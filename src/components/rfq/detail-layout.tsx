@@ -49,7 +49,7 @@ export function DetailLayout({ detailId, detail, children }: { detailId: string 
     <>
       <div
         className={cn(
-          "flex min-h-0 flex-1 flex-col [--panel:26rem] motion-safe:transition-[grid-template-columns] motion-safe:duration-300 lg:grid lg:grid-rows-[minmax(0,1fr)] xl:[--panel:30rem] 2xl:[--panel:34rem]",
+          "flex min-h-0 flex-1 flex-col [--panel:26rem] motion-safe:transition-[grid-template-columns] motion-safe:duration-300 lg:grid lg:grid-rows-[minmax(0,1fr)] xl:[--panel:28rem] 2xl:[--panel:30rem]",
           EASE,
         )}
         style={{ gridTemplateColumns: `minmax(0,1fr) ${open && desktop ? "var(--panel)" : "0rem"}` }}

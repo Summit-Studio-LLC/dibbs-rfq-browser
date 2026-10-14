@@ -9,7 +9,7 @@ import { FilterBar } from "./filter-bar";
 import { NavigationProvider } from "./navigation";
 import { ResultsTable } from "./results-table";
 
-const PAGE = "mx-auto w-full max-w-[1680px] px-4 sm:px-6 lg:px-8";
+const PAGE = "mx-auto w-full max-w-[2560px] px-4 sm:px-6 lg:px-8";
 
 export async function Browser({ searchParams }: { searchParams: Promise<RawParams> }) {
   const filters = parseFilters(await searchParams);

@@ -70,7 +70,7 @@ type Prefs = ReturnType<typeof useColumnPrefs>;
 
 const ROW_BG = "[--row-bg:var(--card)] hover:[--row-bg:color-mix(in_oklab,var(--accent)_70%,var(--card))]";
 const SELECTED_BG = "[--row-bg:color-mix(in_oklab,var(--primary)_8%,var(--card))]";
-const ITEM_MIN_WIDTH = 300;
+const ITEM_MIN_WIDTH = 240;
 
 export function ResultsTable({ rows, total, pageCount, today }: { rows: RfqRow[]; total: number; pageCount: number; today: string }) {
   const { f, committed, pending, select, apply } = useNav();
@@ -692,18 +692,20 @@ function Pager({ total, pageCount, count }: { total: number; pageCount: number; 
 
   return (
     <nav aria-label="Pagination" className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t bg-card px-3 py-2">
-      <p className="text-sm text-muted-foreground tabular-nums">
-        Showing{" "}
-        <span className="font-medium text-foreground">
-          {first.toLocaleString()}–{(first + count - 1).toLocaleString()}
-        </span>{" "}
-        of {total.toLocaleString()}
-        <span className="ml-3 hidden text-xs xl:inline">
+      <div className="min-w-0 space-y-0.5">
+        <p className="hidden text-xs text-muted-foreground xl:block">
           <Kbd>j</Kbd> <Kbd>k</Kbd> move · <Kbd>Esc</Kbd> close · <Kbd>/</Kbd> search · Shift+click a header for a second sort
-        </span>
-      </p>
+        </p>
+        <p className="text-sm text-muted-foreground tabular-nums">
+          Showing{" "}
+          <span className="font-medium text-foreground">
+            {first.toLocaleString()}–{(first + count - 1).toLocaleString()}
+          </span>{" "}
+          of {total.toLocaleString()}
+        </p>
+      </div>
       {pageCount > 1 && (
-        <div className="flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-1">
           <PageLink page={1} label="First page" disabled={page <= 1} className="hidden sm:inline-flex">
             <ChevronFirstIcon />
           </PageLink>
