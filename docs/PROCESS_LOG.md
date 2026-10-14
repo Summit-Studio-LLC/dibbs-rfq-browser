@@ -154,3 +154,15 @@ Searchable: solicitation #, NSN (with or without dashes, plus NIIN), item name
 (nomenclature: noun-first, truncated at 21 chars, so partial matching is needed),
 approved manufacturer part #, approved-source CAGE, PR #.
 Not available anywhere in the files: company names, full item descriptions/specs (PDF only), price/value.
+
+## 11. Blank page live on Vercel with Neon connected
+- **Noah:** "Let's get a blank Vercel page up and running with Neon configured and connected,
+  then talk data modelling, then UI."
+- Shipped: landing page (static shell + streamed DB status), `/api/health` (Neon), and
+  `/api/health/dibbs` (DIBBS reachability), deployed from `master` via the Git integration.
+- **Production:** https://salespatriot-bay.vercel.app. Neon answers in ~50–75 ms.
+- **The biggest risk is retired:** DIBBS is reachable from Vercel (iad1), consent included. It's
+  slow (~15 s to consent and list dates, vs ~2 s locally), which is fine for a daily cron
+  inside the 300 s function limit. The laptop fallback isn't needed.
+- A background security review flagged `/api/health` for echoing raw DB driver errors (which
+  can include connection details). Fixed: log server-side, return a generic message.

@@ -7,9 +7,11 @@ export async function GET() {
   await connection();
   const started = performance.now();
   try {
-    const { rows } = await getDb().execute(sql`select current_database() as database, now() as server_time`);
-    return Response.json({ ok: true, ...rows[0], latencyMs: Math.round(performance.now() - started) });
+    await getDb().execute(sql`select 1`);
+    return Response.json({ ok: true, latencyMs: Math.round(performance.now() - started) });
   } catch (err) {
-    return Response.json({ ok: false, error: (err as Error).message }, { status: 503 });
+    // Driver errors can include connection details; keep them in server logs only.
+    console.error("[health] database check failed", err);
+    return Response.json({ ok: false, error: "database unreachable" }, { status: 503 });
   }
 }
