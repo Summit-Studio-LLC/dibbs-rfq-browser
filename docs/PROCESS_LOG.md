@@ -269,3 +269,57 @@ decision points. Noah's answers:
   secondary sorting, column arrangement with drag-n-drop, (sorting shouldn't just be the ascii
   icon, use proper icon library), column filtering (adding and removing columns remembered via
   local storage). better pagination information/interactivity at both the top and bottom of a page."
+
+## 16. Power table, responsiveness, microinteractions, logo, performance
+- **Noah's asks (all in one burst):**
+  - "power up the table like a real modern powerhouse. primary and secondary sorting, column
+    arrangement with dragndrop, (sorting shouldn't just be the ascii icon, use proper icon
+    library), column filtering (adding and removing columns remembered via local storage).
+    better pagination information/interactibility at both the top and bottom of a page."
+  - "we also need to address responsiveness. we have a lot of horizontal space in the input part.
+    for mobile view, we should use an actual drawer for the side panel. and more filters should
+    be a bottom drawer that pops up as mobile users expect."
+  - "please use a subagent to generate a logo in different sizes and use it on the main page and
+    the favicon as well. you're welcome to use codex for that."
+  - "You should also do a serious pass on microinteractions. the sidebar should animate in via
+    appropriate shrink of the table and expansion of the side bar."
+  - "the date search input should allow for custom date range. not just our pre-canned ones. our
+    Next on pagination should have appropriate loading state between pages. ALSO, let's measure
+    performance of our queries and see how neon is fairing with our sample size."
+  - Final stretch: "ok, we are in the last 30 minutes before our call. let's get across the
+    finish line."
+- **Parallelized with subagents:** one generated the brand mark and favicon set (hex nut doubling
+  as a magnifier, "find the part"). It used rsvg-convert and ImageMagick rather than codex, and
+  hand-tuned a 16 px variant. A second wrote `scripts/bench-queries.ts` and
+  `docs/PERFORMANCE.md`. Claude built the UI meanwhile. Each agent had a strict file allow-list,
+  so the work didn't collide.
+- **Decision: dropped TanStack Table.** It resolved to v9 (new API). Sorting and paging are
+  server-side (URL → SQL), so the client only needs column order and visibility. A small
+  localStorage store plus dnd-kit was simpler and lighter.
+- **What shipped:**
+  - Multi-sort: click a header to sort, Shift+click or the column menu to add up to 3 levels.
+    Lucide arrows rotate on flip, with level numbers, plus sort chips in the toolbar.
+  - Drag headers to reorder columns. The column picker shows/hides and reorders, saved per
+    browser.
+  - Sticky header and first column.
+  - Top bar: range, rows per page, compact pager. Bottom bar: numbered pages, first/last,
+    go-to-page.
+  - The clicked page button spins, the table dims after 150 ms, and a progress bar runs.
+  - Detail panel: the grid track animates so the table shrinks as the panel grows. Below lg it's
+    a vaul bottom drawer. j/k and Esc work.
+  - Facets and More filters become bottom drawers on phones. On desktop, filters share the
+    search row.
+  - Custom closing-date range with a 2-month calendar.
+- **Bug avoided by design:** one shared optimistic navigation state, so a sort click right after
+  a filter change can't drop that filter.
+- **Neon numbers (benchmark agent, live data: 9,818 rows):**
+  - Page queries from the laptop: p50 49–78 ms, p95 51–105 ms, mostly the 30 ms network round
+    trip.
+  - Production: TTFB about 110–127 ms (static shell from the CDN); full page p50 about 230–260 ms.
+  - Slowest query: deep pages (page 50 = 19 ms vs 0.9 ms) because per-row subqueries run for
+    skipped rows. Facets are 8 scans and about 28 ms of CPU per view.
+  - No cold start seen.
+  - Recommendations: cache facets until the next ingest (`"use cache"` + tag), use keyset or
+    keys-first pagination, and fold part #/CAGE into `search_text` so the trigram index gets used.
+- **Cut for time:** a dedicated sort-editor popover (the "Sort" menu plus chips cover it), body
+  cells dragging along with the header, and the cron ingest route.
