@@ -166,3 +166,33 @@ Not available anywhere in the files: company names, full item descriptions/specs
   inside the 300 s function limit. The laptop fallback isn't needed.
 - A background security review flagged `/api/health` for echoing raw DB driver errors (which
   can include connection details). Fixed: log server-side, return a generic message.
+
+## 12. Data-model review: Noah's calls
+Claude proposed a schema (line items, approved sources, posting days, FSC names) with six
+decision points. Noah's answers:
+1. **Rows are line items** (solicitation # + PR #): *"exactly my thoughts."*
+2. **Approved sources table:** *"I don't understand enough to weigh in, please explain more
+   simply."* Claude re-explained it with a phone-book analogy (the list belongs to the part,
+   not the RFQ).
+3. **DB stores codes, app maps labels:** *"100% we will have some kind of mapping."*
+4. **Hide closed RFQs by default, keep them in the DB:** agreed.
+5. **Amendments/re-posts:** Noah pushed back on a plain overwrite: *"I'd prefer a more nuanced
+   approach IF it makes sense. Say an RFQ says one thing, I make a bid, then it changes
+   adversely? Or showing RFQ details in the side panel with adjustments for visibility?
+   If this is NOT how things usually work, fine, we can mutate the row directly."*
+   - **Claude checked the data before designing for it:** pulled 14 posting days of index
+     files (9/25–10/13: 32,143 lines, 30,855 distinct line items).
+     - 3.9% of line items reappear on a later day. 98% of those changed a field.
+     - What changed: **return-by date 1,152×, always an extension** (+3d 735×, +6d 352×,
+       up to +9d; **zero shortenings**), and **buyer reassignment 133×**.
+     - Quantity, NSN, item name, set-aside, AMSC: **never changed** in two weeks.
+     - Substantive amendments (spec/qty changes) live in amendment PDFs, not these files.
+   - **Recommendation:** keep the current row up to date, plus a tiny append-only
+     `rfq_changes` table (field, old → new, day seen). That's cheap, and it powers an
+     "Extended +3d" badge and a "History" section in the side panel. The adverse case Noah
+     worried about (deadline pulled in) never showed up in the data.
+6. **Ignore the ~110 vendor-response columns in `bq`:** Noah: *"oh, so those are input
+   fields... weird. But fine."* Claude clarified that `bq` is a round-trip batch-quote
+   template: DIBBS pre-fills the requirements, the vendor fills in price/delivery and uploads
+   it back. **Noah added a TODO: a form to fill those in** (tracked in `docs/TODO.md`).
+- **Noah:** *"Again, please record our interactions so we can review during the interview."*
