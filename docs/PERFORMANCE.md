@@ -125,3 +125,104 @@ What degrades first:
    only once a filter actually becomes selective.
 5. **Minor: one round trip for the detail panel**, by looking up by id inside each of the 4 queries. This
    only matters far from the database.
+
+## After: caching, keys-first paging, indexed search
+
+Measured 2026-10-14, same data (9,818 line items). For a fair comparison, the old `queries.ts` and the new one were
+benchmarked back to back (21:56 and 21:57 UTC) with the same script. The "before" numbers below come from that run,
+and they match the baseline above to within noise.
+
+What changed:
+
+1. **Indexed search.** Each line item now carries a copy of its NSN's approved sources: `source_parts` (distinct
+   lowercased part numbers, space-separated, trigram GIN) and `source_cages` (`text[]`, GIN). Ingest maintains
+   both (`refreshSourceSearch`), and `scripts/backfill-source-search.ts` filled them once. A search token is now
+   `search_text LIKE … OR source_parts LIKE … OR source_cages @> {TOKEN}`, three indexed arms on one table, so
+   Postgres answers it with a single BitmapOr. Matches are unchanged: tokens never contain whitespace, so a
+   `LIKE` hit in the space-separated list falls inside one part number, and a CAGE code needs an exact element
+   match, as before.
+2. **Keys first.** The ordered `LIMIT/OFFSET` scan selects only `(solicitation_number, pr_number)`. Source count,
+   extension days and the matched part are then computed for the 50 rows of that page only. The outer query
+   re-sorts by the same `ORDER BY`, which ends in the primary key, so the order is identical. Sorting by
+   `sources` still needs the count inside the inner `ORDER BY`.
+3. **Caching until the next ingest.** `searchRfqs`, `getFacets` and `getRfqDetail` are `"use cache"`
+   (`cacheLife("hours")`, `cacheTag("rfq-data")`). The cache key holds the filters plus a stamp:
+   today's Eastern date (read at request time, because "open" depends on it) and a data version (count and
+   latest `ingested_at` of `posting_days`). Facets ignore sort, page and selection, so all pages of a view share
+   one entry. On a hit, a page view costs **1 query** (the `posting_days` read behind the stamp and the
+   "data as of" line) instead of 10.
+4. **Ingest cron.** `GET /api/cron/ingest` loads the posting days that aren't loaded yet, then calls
+   `revalidateTag("rfq-data", { expire: 0 })`. It runs at 12:00, 14:00, 17:00 and 21:00 UTC, Monday to Friday.
+
+**Correctness check.** I snapshotted the full output of the query functions for 44 URL scenarios before and
+after the change: search, paging to the last page, every sort including `-sources` and multi-sorts, filters,
+`closed=1`, part numbers, CAGE codes, dashed NSNs, multi-token searches and escaping. I also snapshotted one
+detail panel. Every search result and the detail are **byte-identical**: rows, order, totals, source counts and
+matched parts. Facets have identical values and counts. The only change is that ties between equal counts now
+have a fixed order (by value), where before it depended on the query plan.
+
+### Database time (EXPLAIN ANALYZE, median of 5, ms)
+
+| Query shape | Before | After | Plan after |
+|---|---:|---:|---|
+| Count, `q=screw` | 2.97 | **0.55** | BitmapOr of `rfq_search_trgm`, `rfq_source_parts_trgm` and `rfq_source_cages`. Before: seq scan |
+| List, `q=BACB30` (part #) | 4.86 | **0.60** | Same bitmap scan. Before: walked every open row |
+| Count, `q=BACB30` | 3.42 | **0.13** | Same bitmap scan |
+| List, `page=50` (offset 2,450) | 17.71 (14,042 buffers) | **4.12** (925) | Subqueries run 50 times, not 2,500 |
+| List, `sort=-sources`, page 50 | 41.85 (35,908) | 33.27 (31,459) | Still counts sources for all 9,786 rows to sort them (see below) |
+| List, `q=screw` | 2.88 | 3.32 | Date-ordered walk, as before, plus 50 primary-key lookups |
+| List / count, default | 0.84 / 1.34 | 0.79 / 1.36 | Unchanged |
+| All 8 facets, summed | 29.60 | 29.76 | Unchanged per miss. On a cache hit they don't run at all |
+| Detail | 0.05 | 0.05 | Unchanged |
+
+Search probes, count query, old SQL against new (totals identical in every case):
+
+| Search | Matches | Before | After |
+|---|---:|---:|---:|
+| `valve` | 530 | 2.87 | 0.46 |
+| `5305-00` (dashed NSN) | 133 | 3.13 | 0.28 |
+| `1560-00-978-0203` (full NSN) | 2 | 3.27 | 0.18 |
+| `BACB30` (approved part #) | 25 | 3.37 | 0.14 |
+| `1QJK4` (CAGE code) | 28 | 4.00 | 0.10 |
+| `screw cap` | 273 | 3.09 | 0.43 |
+| `o-ring` | 105 | 2.96 | 0.44 |
+| `00` (unselective) | 7,833 | 7.05 | 3.68 (seq scan, the right plan) |
+
+Rejected alternatives: `nsn IN (select … from approved_sources …)` gets the same hashed-subplan seq scan as
+`EXISTS`. `nsn = any(array(select …))` does use the indexes, but it rechecks the array linearly and took 81 ms
+for `00`. A `UNION` of two lookups was still planned as a hash join.
+
+### App latency from a laptop, cache miss (p50 / p95 ms, page = both calls in parallel)
+
+| Scenario | Before | After |
+|---|---:|---:|
+| Default view | 62 / 89 | 54 / 82 |
+| `q=screw` | 75 / 104 | 46 / 105 |
+| `q=5305-00` | 72 / 75 | 42 / 45 |
+| `q=BACB30` | 79 / 86 | 41 / 74 |
+| `sa=Y&closing=7` | 56 / 82 | 47 / 51 |
+| `fsc=5305,5310&type=F&sort=-qty,closes` | 50 / 57 | 45 / 49 |
+| `page=50` | 81 / 100 | 54 / 91 |
+| `sort=-sources&page=50` | 104 / 109 | 79 / 87 |
+| `closed=1&size=100` | 50 / 93 | 54 / 78 |
+
+The floor is still about one round trip (31 ms), and p95 values are single-sample noise over the laptop link.
+The benchmark calls the uncached functions, because `"use cache"` only runs inside Next. So these are
+cache-miss costs. A hit skips all of them except the one `posting_days` query.
+
+### Not measured yet, and what's left
+
+- **The cache hit path.** It can only run inside Next, and this pass didn't run a build or the server. After
+  deploying, re-run section 3. Repeat views should drop to roughly one `posting_days` round trip of database
+  time. The default `"use cache"` store is in memory per function instance, so each instance warms its own
+  copy. That's also why the data version is in the key: an instance that never received the tag invalidation
+  still can't serve results from older data. `"use cache: remote"` (Vercel Runtime Cache, shared per region)
+  is the next step if instance-local hit rates turn out low.
+- **Sorting by sources** still needs every row's count before it can sort (33 ms). If it matters, store a
+  `source_count` column alongside `source_parts`, maintained by the same refresh.
+- **Facets on a miss** are unchanged: 8 scans, about 30 ms. Caching hides them for repeat views. The scale
+  notes in section 5 still apply to the first view after each ingest.
+- `rfq_line_items` grew from 8.9 MB to 15 MB with its indexes. About 3.4 MB of that is the two new GIN indexes
+  (2.9 MB and 0.5 MB). The rest is space left behind by the one-time backfill, which rewrote 6,877 rows. It's
+  harmless at this size, and a `REINDEX`/`VACUUM FULL` would reclaim it. The old `approved_sources_part_trgm`
+  and `approved_sources_cage` indexes are no longer used by search and could be dropped.

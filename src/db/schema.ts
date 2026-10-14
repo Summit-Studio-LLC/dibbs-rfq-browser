@@ -34,11 +34,17 @@ export const rfqLineItems = pgTable(
     searchText: text("search_text").generatedAlwaysAs(
       sql`lower(solicitation_number || ' ' || nsn || ' ' || nomenclature || ' ' || pr_number)`,
     ),
+    // Search copies of this NSN's approved_sources, kept by ingest (refreshSourceSearch), so a search
+    // token can match a part # or CAGE code through an index here instead of a subquery. Null = no sources.
+    sourceParts: text("source_parts"), // distinct lower(part_number), space-separated
+    sourceCages: text("source_cages").array(), // distinct CAGE codes
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     primaryKey({ columns: [t.solicitationNumber, t.prNumber] }),
     index("rfq_search_trgm").using("gin", sql`${t.searchText} gin_trgm_ops`),
+    index("rfq_source_parts_trgm").using("gin", sql`${t.sourceParts} gin_trgm_ops`),
+    index("rfq_source_cages").using("gin", t.sourceCages),
     index("rfq_return_by").on(t.returnByDate),
     index("rfq_posted").on(t.postedDate),
     index("rfq_nsn").on(t.nsn),

@@ -378,3 +378,21 @@ decision points. Noah's answers:
     filler column at the end takes the slack. Double-clicking Item's edge makes it fill again.
   - Verified by measuring every divider mid-drag in Playwright: the dragged edge moves exactly
     the drag distance, columns to its left don't move, and columns to its right shift.
+- **Backend agent landed** (a parallel subagent, limited to backend files; I reviewed, built and
+  shipped its work):
+  - `/api/cron/ingest`:
+    - Checks a Bearer `CRON_SECRET` in constant time and returns a generic error, never details.
+    - Stops starting new posting days after a 180s budget. Days it didn't reach are returned as
+      `pending` and loaded by the next run.
+    - Revalidates the `rfq-data` cache tag after loading anything.
+  - Schedule: `vercel.json`, weekdays at 8am, 10am, 1pm and 5pm Eastern (summer time).
+  - Search: each line item now carries indexed copies of its NSN's approved part numbers and
+    CAGE codes, so part #/CAGE searches use indexes. Counts: `BACB30` 3.4 → 0.14 ms, CAGE
+    `1QJK4` 4.0 → 0.10 ms.
+  - Keys-first pagination: page 50 went from 17.7 to 4.1 ms.
+  - `"use cache"` on results, facets and detail. Each cache key includes today's Eastern date and
+    a data version (loaded day count + last ingest time), so no server instance can serve stale
+    data.
+  - Proof: the agent diffed 44 URL scenarios byte-for-byte before vs after. I re-checked 7 views
+    in a browser, local build vs production: identical counts, row order and matched parts.
+  - Still Noah's call: setting `CRON_SECRET` in Vercel. Until then the cron gets a harmless 401.

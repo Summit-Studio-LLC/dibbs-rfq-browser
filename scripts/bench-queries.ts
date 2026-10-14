@@ -6,10 +6,17 @@
  *
  * --conditions=react-server lets queries.ts import "server-only" outside Next. Default 15 runs.
  * Timings from a laptop include a network round trip to Neon per HTTP query; see docs/PERFORMANCE.md.
+ * The page calls cached wrappers of these functions ("use cache", which only runs inside Next), so this
+ * measures what a cache miss costs: the queries underneath.
  */
 import { neon, neonConfig } from "@neondatabase/serverless";
 import { parseFilters } from "../src/lib/rfqs/filters";
-import { getFacets, getFreshness, getRfqDetail, searchRfqs } from "../src/lib/rfqs/queries";
+import {
+  getFacetsUncached as getFacets,
+  getFreshness,
+  getRfqDetailUncached as getRfqDetail,
+  searchRfqsUncached as searchRfqs,
+} from "../src/lib/rfqs/queries";
 
 const RUNS = Number(process.argv.find((a) => /^\d+$/.test(a)) ?? 15);
 const EXPLAIN_RUNS = 5;
@@ -23,6 +30,7 @@ const SCENARIOS: [name: string, query: string][] = [
   ["set-aside + closing", "sa=Y&closing=7"],
   ["fsc + type + multi-sort", "fsc=5305,5310&type=F&sort=-qty,closes"],
   ["deep page", "page=50"],
+  ["deep page, sort by sources", "sort=-sources&page=50"],
   ["include closed, 100/page", "closed=1&size=100"],
 ];
 const DETAIL_ID = "SPE4A727T0768~7018681797"; // 31 approved sources
@@ -166,8 +174,9 @@ async function main() {
   // 3. Database execution time for the main SQL shapes, captured from the real query functions.
   const [list, count] = await capture(() => searchRfqs(filtersFor("")));
   const [keyword, keywordCount] = await capture(() => searchRfqs(filtersFor("q=screw")));
-  const [part] = await capture(() => searchRfqs(filtersFor("q=BACB30")));
+  const [part, partCount] = await capture(() => searchRfqs(filtersFor("q=BACB30")));
   const [deep] = await capture(() => searchRfqs(filtersFor("page=50")));
+  const [deepSources] = await capture(() => searchRfqs(filtersFor("sort=-sources&page=50")));
   const facetQueries = await capture(() => getFacets(filtersFor("")));
   const [detail] = await capture(() => getRfqDetail(DETAIL_ID));
   const shapes: [string, Captured | undefined][] = [
@@ -176,7 +185,9 @@ async function main() {
     ["list, q=screw", keyword],
     ["count, q=screw", keywordCount],
     ["list, q=BACB30 (part #)", part],
+    ["count, q=BACB30 (part #)", partCount],
     ["list, page=50 (offset 2450)", deep],
+    ["list, sort=-sources, page=50", deepSources],
     ["facet: set-aside group-by", facetQueries.find((c) => c.query.startsWith('select "set_aside"'))],
     ["facet: fsc group-by + join", facetQueries.find((c) => c.query.includes('left join "fsc_classes"'))],
     ["detail: primary-key lookup", detail],
