@@ -98,3 +98,59 @@ so the ingester has to accept consent on both domains.
   approved source."
 - **Stack:** Next.js App Router + TypeScript, Tailwind + shadcn/ui, Drizzle on Neon's
   serverless driver, Vercel Cron.
+
+## 6. Repo + hosting setup
+- Next.js 16.4 scaffolded (`create-next-app`, TS, Tailwind, App Router, `src/`), branch `master`.
+- Public repo created: https://github.com/Noahbanderson/dibbs-rfq-browser
+- **Misstep (Claude):** `vercel link --scope noah-anderson` was rejected ("cannot set your
+  Personal Account as the scope"). The follow-up `vercel git connect --yes` then silently
+  auto-linked to the CLI's default team, creating an empty project `summit-studio/sales_patriot`.
+  Claude caught it, removed the local `.vercel` link, and flagged it to Noah instead of
+  deleting anything on the team account unasked. Lesson: never chain `--yes` commands after
+  a scope failure. Verify the link target first.
+- The Vercel GitHub App also lacks access to the personal repo, so it can't connect yet.
+
+## 7. Noah: "Which RFQ page section are we using? How do we download the data?"
+- Neither search form. *Custom Queries* is a structured search of DIBBS's database, and
+  *Solicitation Text Search* is a keyword search inside solicitation documents. Both return
+  paginated ASP.NET result pages we'd have to scrape.
+- We use **Recent RFQs → daily download files** (linked under "Other Search Options"),
+  served from `dibbs2.bsm.dla.mil/Downloads/RFQ/Archive/`.
+
+## 8. Noah narrows scope: "3 days' worth, it's a POC, get to UI + data decisions sooner"
+- Claude dropped the separate Vercel-reachability step (it gets folded into the first deploy
+  of the ingest route) and pulled the latest posting days locally into `data/raw/` (gitignored):
+  Tue 10/13 = 2,204 line items, Mon 10/12 = 7,295, Sun 10/11 = 6.
+- The TypeScript `DibbsSession` (per-host cookie jar + manual redirects + automatic consent
+  click-through) worked on the first run against both hosts.
+
+## 9. Noah: "Which format should we use, zip, txt or bq? And why?"
+Decision: **`in.txt` is the spine, `bq.zip` is enrichment, skip `ca.zip`.**
+- `ca.zip` holds the solicitation PDFs: heavy and unstructured. Each row links to its PDF on DIBBS instead.
+- `in.txt` is required. It's the only file with the **item name** (nomenclature, which is what
+  vendors search for), **AMSC**, buyer code, and the PDF filename (our link back to DIBBS).
+- `bq.zip` adds the evaluation fields: solicitation type (Fast auto-eval / auto-eval / AIDC /
+  manual, matching DIBBS's own "Fast Award" + "AIDC" filters), **required delivery days**,
+  FOB + inspection point, and the `as` approved-sources file (CAGE + manufacturer part #).
+- Verified the join: (solicitation #, PR #) matches 100% both ways on both days (9,497 line items).
+  `bq` has extra rows per line item, which get collapsed.
+
+**Data profile (10/12–10/13, ~9.5k line items):**
+- Set-aside: 85% unrestricted, 12% small business, ~1.5% each SDVOSB / HUBZone, <1% WOSB.
+- Solicitation type (by `bq` row): 72% fast auto-eval, 25% auto-eval, 1.4% AIDC, 1.3% manual.
+- FOB: 93% origin. Inspection: 75% destination, 25% origin (a gov't inspector at the vendor's plant).
+- 277 distinct FSCs. Top: 5305 screws, 5310 nuts/washers, 4820 valves, 4720 hose/tube, 5340 hardware.
+- Buying office (solicitation prefix): SPE4A 43%, SPE7M 30%, SPE7L 17%, SPE2D 4%, SPE8E 3%.
+- Qty: median 15, p90 445, max 318,000. Required delivery: median 164 days (p10 20, p90 213).
+- Return-by dates cluster 1–2 weeks out (10/16–10/26). 99.9% of items are NSNs (not bare part numbers).
+
+## 10. Noah: "What I care about is what kind of fields can we search by?"
+Checked the approved-sources file before answering: ~70% of RFQ NSNs have ≥1 approved
+source (~2.5k distinct CAGEs), but the company-name column is blank in ~100% of rows, so
+CAGE + part # are searchable and company name is not. One row had a stray quote inside a
+part number, so the CSV parser needs to be tolerant.
+
+Searchable: solicitation #, NSN (with or without dashes, plus NIIN), item name
+(nomenclature: noun-first, truncated at 21 chars, so partial matching is needed),
+approved manufacturer part #, approved-source CAGE, PR #.
+Not available anywhere in the files: company names, full item descriptions/specs (PDF only), price/value.
