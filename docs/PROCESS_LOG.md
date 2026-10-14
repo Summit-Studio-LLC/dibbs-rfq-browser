@@ -196,3 +196,20 @@ decision points. Noah's answers:
    template: DIBBS pre-fills the requirements, the vendor fills in price/delivery and uploads
    it back. **Noah added a TODO: a form to fill those in** (tracked in `docs/TODO.md`).
 - **Noah:** *"Again, please record our interactions so we can review during the interview."*
+
+## 13. Schema + ingest built and loaded
+- **Noah:** "2) Yes, a lookup table makes sense. 5) Sounds good to me. Build fast."
+- **Tables:** `rfq_line_items` (PK solicitation # + PR #), `approved_sources` (lookup by NSN),
+  `rfq_changes` (field-level re-post history), `posting_days` (idempotent ingest, "data as of"),
+  `fsc_classes` (666 names snapshotted from DIBBS "RFQs by FSC", identical to DIBBS's labels).
+- **Search design change (Claude):** substring matching with a pg_trgm GIN index on one generated
+  `search_text` column, instead of linguistic full-text search. DIBBS item names are truncated
+  codes (`ANALYZER,BLOOD CHOLES`), so substring matching fits vendors better. It also covers
+  NSN/solicitation fragments. Approved part numbers get their own trigram index.
+- **Ingest:** fetch `in` + `bq` per day, oldest first. Diff re-posted items against the current
+  row and write changes to `rfq_changes`, upsert in 500-row batches, keep the first posted date.
+  The same function powers the CLI (`pnpm ingest`) and the future cron route.
+- **Loaded:** window 10/09 (Fri, 319), 10/11 (Sun, 6), 10/12 (Mon, 7,295), 10/13 (Tue, 2,202).
+  9,818 line items, 9,483 solicitations, 11,631 approved sources, 100% `bq` coverage, in 10 s.
+- **Query timings from a laptop (incl. network):** 30–60 ms for keyword + set-aside + open-only,
+  partial words, NSN fragments, and approved part # lookups.
