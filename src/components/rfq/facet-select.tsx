@@ -3,9 +3,9 @@
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { FacetOption } from "@/lib/rfqs/queries";
 import { cn } from "@/lib/utils";
+import { ResponsivePopover } from "./responsive-popover";
 
 export type FacetChoice = { value: string; label: string; hint?: string; count: number };
 
@@ -52,15 +52,21 @@ export function FacetSelect({
         : null;
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className={cn("max-w-64 bg-card", selected.length && "border-primary/40 bg-accent text-accent-foreground", className)}>
+    <ResponsivePopover
+      title={title}
+      className="w-80 p-0"
+      trigger={
+        <Button
+          variant="outline"
+          size="sm"
+          className={cn("h-8 max-w-64 shrink-0 bg-card", selected.length && "border-primary/40 bg-accent text-accent-foreground", className)}
+        >
           <span className={cn(selected.length && "text-muted-foreground")}>{title}</span>
           {summary && <span className="truncate font-semibold">{summary}</span>}
-          <ChevronDownIcon className="text-muted-foreground" />
+          <ChevronDownIcon className="text-muted-foreground transition-transform group-aria-expanded/button:rotate-180" />
         </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-80 p-0" align="start">
+      }
+    >
         <Command>
           {searchable && <CommandInput placeholder={`Search ${title.toLowerCase()}…`} />}
           <CommandList className="max-h-80">
@@ -101,7 +107,6 @@ export function FacetSelect({
             </div>
           )}
         </Command>
-      </PopoverContent>
-    </Popover>
+    </ResponsivePopover>
   );
 }

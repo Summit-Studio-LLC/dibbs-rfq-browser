@@ -1,17 +1,17 @@
 "use client";
 
-import { ArrowUpDownIcon, LoaderCircleIcon, SearchIcon, SlidersHorizontalIcon, XIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { startTransition, useEffect, useOptimistic, useRef, useState } from "react";
+import { format } from "date-fns";
+import { CalendarRangeIcon, LoaderCircleIcon, SearchIcon, SlidersHorizontalIcon, XIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import type { DateRange } from "react-day-picker";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { activeFilterCount, CLOSING_WINDOWS, DEFAULT_FILTERS, type Filters, hrefWith, type Sort, SORTS } from "@/lib/rfqs/filters";
+import { activeFilterCount, CLOSING_WINDOWS, DEFAULT_FILTERS, type Filters } from "@/lib/rfqs/filters";
 import {
   AMSC,
   BUYING_OFFICES,
@@ -26,79 +26,133 @@ import {
 import type { Facets } from "@/lib/rfqs/queries";
 import { cn } from "@/lib/utils";
 import { type FacetChoice, FacetSelect, facetChoices } from "./facet-select";
+import { useIsTabletUp } from "./hooks";
+import { useNav } from "./navigation";
+import { ResponsivePopover } from "./responsive-popover";
 
-export function FilterBar({ filters, facets, total }: { filters: Filters; facets: Facets; total: number }) {
-  const router = useRouter();
-  const [f, setOptimistic] = useOptimistic(filters);
-  const [pending, setPending] = useOptimistic(false);
+export const ACTIVE_CONTROL = "border-primary/40 bg-accent text-accent-foreground";
 
-  const apply = (patch: Partial<Filters>) =>
-    startTransition(() => {
-      setOptimistic({ ...f, ...patch, page: "page" in patch ? (patch.page ?? 1) : 1 });
-      setPending(true);
-      router.replace(hrefWith(f, patch), { scroll: false });
-    });
+export function FilterBar({ facets, today }: { facets: Facets; today: string }) {
+  const { f, pending, apply } = useNav();
 
   const setAside = facetChoices(facets.setAside, f.setAside, (v) => SET_ASIDES[v] ?? v, (v) => SET_ASIDE_DESCRIPTIONS[v]);
   const type = facetChoices(facets.type, f.type, (v) => SOLICITATION_TYPES[v] ?? v, (v) => SOLICITATION_TYPE_DESCRIPTIONS[v]);
   const fsc = facetChoices(facets.fsc, f.fsc, (v, name) => (name ? `${v} · ${name}` : v));
+  const custom = !!(f.closesFrom || f.closesTo);
 
   return (
-    <div data-filtering={pending ? "" : undefined} className="space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <SearchBox value={f.q} onSearch={(q) => apply({ q })} pending={pending} />
-        <Select value={f.sort} onValueChange={(sort) => apply({ sort: sort as Sort })}>
-          <SelectTrigger className="h-11! w-full bg-card shadow-xs sm:w-52" aria-label="Sort">
-            <ArrowUpDownIcon className="text-muted-foreground" />
-            <SelectValue>
-              <span className="text-muted-foreground">Sort:</span> {SORTS[f.sort]}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent align="end">
-            {Object.entries(SORTS).map(([value, label]) => (
-              <SelectItem key={value} value={value}>
-                {label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <ToggleGroup
-          type="single"
-          variant="outline"
-          size="sm"
-          spacing={0}
-          value={f.closing ? String(f.closing) : "any"}
-          onValueChange={(v) => v && apply({ closing: v === "any" ? null : Number(v) })}
-          aria-label="Closing within"
-        >
-          <ToggleGroupItem value="any" className={TOGGLE}>
-            Any close date
-          </ToggleGroupItem>
-          {CLOSING_WINDOWS.map((n) => (
-            <ToggleGroupItem key={n} value={String(n)} className={TOGGLE} title={`Return by within ${n} days`}>
-              ≤ {n} days{" "}
-              <span className="text-xs font-normal text-muted-foreground tabular-nums">{facets.closing[`d${n}`]?.toLocaleString()}</span>
+    <div className="space-y-2.5">
+      <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center lg:gap-3">
+        <SearchBox value={f.q} onSearch={(q) => apply({ q })} pending={pending === "filter"} />
+        <div className="no-scrollbar -mx-4 flex items-center gap-2 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            spacing={0}
+            value={custom ? "" : f.closing ? String(f.closing) : "any"}
+            onValueChange={(v) => v && apply({ closing: v === "any" ? null : Number(v), closesFrom: null, closesTo: null })}
+            aria-label="Closing within"
+            className="shrink-0"
+          >
+            <ToggleGroupItem value="any" className={TOGGLE}>
+              Any close
             </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        <FacetSelect title="Set-aside" choices={setAside} selected={f.setAside} onChange={(v) => apply({ setAside: v })} />
-        <FacetSelect title="Supply class" choices={fsc} selected={f.fsc} onChange={(v) => apply({ fsc: v })} searchable />
-        <FacetSelect title="Award type" choices={type} selected={f.type} onChange={(v) => apply({ type: v })} />
-        <MoreFilters f={f} facets={facets} apply={apply} />
+            {CLOSING_WINDOWS.map((n) => (
+              <ToggleGroupItem key={n} value={String(n)} className={TOGGLE} title={`Return by within ${n} days`}>
+                ≤ {n}d <span className="text-xs font-normal text-muted-foreground tabular-nums">{facets.closing[`d${n}`]?.toLocaleString()}</span>
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+          <DateRangeFilter today={today} />
+          <FacetSelect title="Set-aside" choices={setAside} selected={f.setAside} onChange={(v) => apply({ setAside: v })} />
+          <FacetSelect title="Supply class" choices={fsc} selected={f.fsc} onChange={(v) => apply({ fsc: v })} searchable />
+          <FacetSelect title="Award type" choices={type} selected={f.type} onChange={(v) => apply({ type: v })} />
+          <MoreFilters f={f} facets={facets} apply={apply} />
+        </div>
       </div>
-
-      <div className="flex min-h-7 flex-wrap items-center gap-x-3 gap-y-2">
-        <p className="text-sm text-muted-foreground">
-          <span className="text-base font-semibold text-foreground tabular-nums">{total.toLocaleString()}</span>{" "}
-          {f.includeClosed ? "" : "open "}line item{total === 1 ? "" : "s"}
-        </p>
-        {pending && <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" aria-label="Loading" />}
-        <ActiveChips f={f} facets={facets} apply={apply} />
-      </div>
+      <ActiveChips f={f} facets={facets} apply={apply} />
     </div>
+  );
+}
+
+const isoToDate = (iso: string) => {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d);
+};
+const dateToIso = (d: Date) => format(d, "yyyy-MM-dd");
+const rangeLabel = (from: string | null, to: string | null) =>
+  from && to ? (from === to ? formatDate(from) : `${formatDate(from)} – ${formatDate(to)}`) : from ? `After ${formatDate(from)}` : `By ${formatDate(to!)}`;
+
+/** Custom return-by window, beyond the ≤ 3/7/14 day presets. */
+function DateRangeFilter({ today }: { today: string }) {
+  const { f, apply } = useNav();
+  const tabletUp = useIsTabletUp();
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<DateRange | undefined>();
+  const active = !!(f.closesFrom || f.closesTo);
+
+  const onOpenChange = (next: boolean) => {
+    if (next) setDraft(f.closesFrom ? { from: isoToDate(f.closesFrom), to: f.closesTo ? isoToDate(f.closesTo) : undefined } : undefined);
+    setOpen(next);
+  };
+  const commit = (patch: Partial<Filters>) => {
+    apply(patch);
+    setOpen(false);
+  };
+
+  return (
+    <ResponsivePopover
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Closing date range"
+      description="RFQs whose return-by date falls in this window."
+      showDone={false}
+      className="w-auto p-0"
+      trigger={
+        <Button variant="outline" size="sm" className={cn("h-8 shrink-0 bg-card", active && ACTIVE_CONTROL)}>
+          <CalendarRangeIcon />
+          {active ? rangeLabel(f.closesFrom, f.closesTo) : "Dates…"}
+        </Button>
+      }
+    >
+      <Calendar
+        mode="range"
+        numberOfMonths={tabletUp ? 2 : 1}
+        selected={draft}
+        onSelect={setDraft}
+        defaultMonth={draft?.from ?? isoToDate(today)}
+        disabled={f.includeClosed ? undefined : { before: isoToDate(today) }}
+        className="mx-auto bg-transparent"
+      />
+      <div className="flex items-center justify-between gap-3 border-t p-3">
+        <p className="text-sm text-muted-foreground">
+          {draft?.from ? (
+            <span className="font-medium text-foreground">
+              {rangeLabel(dateToIso(draft.from), dateToIso(draft.to ?? draft.from))}
+            </span>
+          ) : (
+            "Pick a start and end date"
+          )}
+        </p>
+        <div className="flex gap-2">
+          {active && (
+            <Button variant="ghost" size="sm" onClick={() => commit({ closesFrom: null, closesTo: null })}>
+              Clear
+            </Button>
+          )}
+          <Button
+            size="sm"
+            disabled={!draft?.from}
+            onClick={() =>
+              draft?.from && commit({ closing: null, closesFrom: dateToIso(draft.from), closesTo: dateToIso(draft.to ?? draft.from) })
+            }
+          >
+            Apply
+          </Button>
+        </div>
+      </div>
+    </ResponsivePopover>
   );
 }
 
@@ -140,7 +194,7 @@ function SearchBox({ value, onSearch, pending }: { value: string; onSearch: (q: 
   }, []);
 
   return (
-    <InputGroup className="h-11 flex-1 bg-card shadow-xs">
+    <InputGroup className="h-10 w-full bg-card shadow-xs lg:w-[24rem] lg:shrink-0 xl:w-[30rem]">
       <InputGroupAddon>{pending ? <LoaderCircleIcon className="animate-spin" /> : <SearchIcon />}</InputGroupAddon>
       <InputGroupInput
         ref={input}
@@ -168,7 +222,7 @@ function SearchBox({ value, onSearch, pending }: { value: string; onSearch: (q: 
 
 type Apply = (patch: Partial<Filters>) => void;
 
-const TOGGLE = "bg-card px-2.5 data-[state=on]:bg-accent data-[state=on]:font-semibold data-[state=on]:text-accent-foreground";
+const TOGGLE = "h-8 bg-card px-2.5 data-[state=on]:bg-accent data-[state=on]:font-semibold data-[state=on]:text-accent-foreground";
 
 function MoreFilters({ f, facets, apply }: { f: Filters; facets: Facets; apply: Apply }) {
   const count =
@@ -186,15 +240,18 @@ function MoreFilters({ f, facets, apply }: { f: Filters; facets: Facets; apply: 
   const inspection = facetChoices(facets.inspection, [], (v) => POINTS[v] ?? v);
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className={cn("bg-card", count && "border-primary/40 bg-accent text-accent-foreground")}>
+    <ResponsivePopover
+      title="More filters"
+      className="max-h-[75vh] w-[min(26rem,calc(100vw-2rem))] overflow-y-auto"
+      trigger={
+        <Button variant="outline" size="sm" className={cn("h-8 shrink-0 bg-card", count && ACTIVE_CONTROL)}>
           <SlidersHorizontalIcon />
           More filters
           {count > 0 && <span className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground">{count}</span>}
         </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="max-h-[75vh] w-[min(26rem,calc(100vw-2rem))] space-y-5 overflow-y-auto">
+      }
+    >
+      <div className="space-y-5">
         <Section title="Quantity">
           <div className="flex items-center gap-2">
             <NumberField label="Min" value={f.qtyMin} onCommit={(qtyMin) => apply({ qtyMin })} />
@@ -261,8 +318,8 @@ function MoreFilters({ f, facets, apply }: { f: Filters; facets: Facets; apply: 
             label="Include RFQs whose return-by date has passed"
           />
         </Section>
-      </PopoverContent>
-    </Popover>
+      </div>
+    </ResponsivePopover>
   );
 }
 
@@ -366,6 +423,9 @@ function ActiveChips({ f, facets, apply }: { f: Filters; facets: Facets; apply: 
   const fscName = (code: string) => facets.fsc.find((o) => o.value === code)?.name;
   const chips: { key: string; label: string; remove: Partial<Filters> }[] = [
     ...(f.closing ? [{ key: "closing", label: `Closes ≤ ${f.closing}d`, remove: { closing: null } }] : []),
+    ...(f.closesFrom || f.closesTo
+      ? [{ key: "range", label: `Closes ${rangeLabel(f.closesFrom, f.closesTo)}`, remove: { closesFrom: null, closesTo: null } }]
+      : []),
     ...f.setAside.map((v) => ({ key: `sa${v}`, label: SET_ASIDES[v] ?? v, remove: { setAside: f.setAside.filter((x) => x !== v) } })),
     ...f.fsc.map((v) => ({ key: `fsc${v}`, label: `${v} ${fscName(v) ?? ""}`.trim(), remove: { fsc: f.fsc.filter((x) => x !== v) } })),
     ...f.type.map((v) => ({ key: `t${v}`, label: SOLICITATION_TYPES[v] ?? v, remove: { type: f.type.filter((x) => x !== v) } })),
@@ -380,7 +440,7 @@ function ActiveChips({ f, facets, apply }: { f: Filters; facets: Facets; apply: 
     ...(f.includeClosed ? [{ key: "closed", label: "Including closed", remove: { includeClosed: false } }] : []),
   ];
   if (!chips.length) return null;
-  const { q, sort } = f;
+  const { q, sort, size, id } = f;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {chips.map((c) => (
@@ -388,14 +448,14 @@ function ActiveChips({ f, facets, apply }: { f: Filters; facets: Facets; apply: 
           key={c.key}
           type="button"
           onClick={() => apply(c.remove)}
-          className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-accent py-0.5 pr-1.5 pl-2.5 text-xs font-medium text-accent-foreground hover:border-primary/40"
+          className="inline-flex animate-in items-center gap-1 rounded-full border border-primary/20 bg-accent py-0.5 pr-1.5 pl-2.5 text-xs font-medium text-accent-foreground transition-colors duration-150 fade-in-0 zoom-in-95 hover:border-primary/40 hover:bg-primary/10"
         >
           {c.label}
           <XIcon className="size-3 text-muted-foreground" />
         </button>
       ))}
       {activeFilterCount(f) > 1 && (
-        <Button variant="link" size="xs" onClick={() => apply({ ...DEFAULT_FILTERS, q, sort, id: f.id })}>
+        <Button variant="link" size="xs" onClick={() => apply({ ...DEFAULT_FILTERS, q, sort, size, id })}>
           Clear all
         </Button>
       )}

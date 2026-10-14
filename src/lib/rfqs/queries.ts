@@ -3,7 +3,7 @@ import { and, asc, desc, eq, gte, inArray, lte, type SQL, sql } from "drizzle-or
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/db";
 import { approvedSources, fscClasses, postingDays, rfqChanges, rfqLineItems as r } from "@/db/schema";
-import { type Filters, PAGE_SIZE } from "./filters";
+import type { Filters, SortKey } from "./filters";
 import { addDays, todayEastern } from "./labels";
 
 /** Search input → tokens. NSN-looking tokens lose their dashes so 5305-00-123-4567 matches 5305001234567. */
@@ -33,6 +33,8 @@ function conditions(f: Filters, today: string, omit?: Dimension): SQL | undefine
   const c: (SQL | undefined)[] = [];
   if (!f.includeClosed) c.push(gte(r.returnByDate, today));
   if (f.closing && omit !== "closing") c.push(lte(r.returnByDate, addDays(today, f.closing)));
+  if (f.closesFrom && omit !== "closing") c.push(gte(r.returnByDate, f.closesFrom));
+  if (f.closesTo && omit !== "closing") c.push(lte(r.returnByDate, f.closesTo));
   if (f.setAside.length && omit !== "setAside") c.push(inArray(r.setAside, f.setAside));
   if (f.fsc.length && omit !== "fsc") c.push(inArray(r.fsc, f.fsc));
   if (f.type.length && omit !== "type") c.push(inArray(r.solicitationType, f.type));
@@ -48,11 +50,35 @@ function conditions(f: Filters, today: string, omit?: Dimension): SQL | undefine
   return and(...c);
 }
 
-const ORDER = {
-  closing: [asc(r.returnByDate), asc(r.solicitationNumber), asc(r.prNumber)],
-  newest: [desc(r.postedDate), asc(r.returnByDate), asc(r.solicitationNumber)],
-  qty: [desc(r.quantity), asc(r.returnByDate), asc(r.solicitationNumber)],
+const sourceCount = sql<number>`(select count(*) from ${approvedSources} a where a.nsn = ${r.nsn})::int`;
+
+/** What each sort key orders by. Set-aside puts restricted (small business etc.) before unrestricted. */
+const SORT_EXPRESSIONS: Record<SortKey, (SQL | AnyPgColumn)[]> = {
+  closes: [r.returnByDate],
+  posted: [r.postedDate],
+  qty: [r.quantity],
+  item: [r.nomenclature],
+  solicitation: [r.solicitationNumber],
+  nsn: [r.nsn],
+  fsc: [r.fsc],
+  setAside: [sql`(${r.setAside} = 'N')`, r.setAside],
+  type: [r.solicitationType],
+  sources: [sourceCount],
+  amsc: [r.amsc],
+  delivery: [r.requiredDeliveryDays],
+  inspection: [r.inspectionPoint],
+  office: [r.buyingOffice],
+  pr: [r.prNumber],
 };
+
+/** ORDER BY for the requested sort levels (nulls always last), with a stable tiebreak. */
+function orderBy(f: Filters) {
+  return [
+    ...f.sort.flatMap((s) => SORT_EXPRESSIONS[s.key].map((e) => (s.desc ? sql`${e} desc nulls last` : sql`${e} asc nulls last`))),
+    asc(r.solicitationNumber),
+    asc(r.prNumber),
+  ];
+}
 
 export type RfqRow = Awaited<ReturnType<typeof searchRfqs>>["rows"][number];
 
@@ -90,8 +116,10 @@ export async function searchRfqs(f: Filters) {
         amsc: r.amsc,
         solicitationType: r.solicitationType,
         requiredDeliveryDays: r.requiredDeliveryDays,
+        fobPoint: r.fobPoint,
+        inspectionPoint: r.inspectionPoint,
         buyingOffice: r.buyingOffice,
-        sourceCount: sql<number>`(select count(*) from ${approvedSources} a where a.nsn = ${r.nsn})::int`,
+        sourceCount,
         extendedDays: sql<number | null>`(select max(c.new_value::date) - min(c.old_value::date) from ${rfqChanges} c
           where c.solicitation_number = ${r.solicitationNumber} and c.pr_number = ${r.prNumber} and c.field = 'returnByDate')`,
         matchedSource,
@@ -99,12 +127,12 @@ export async function searchRfqs(f: Filters) {
       .from(r)
       .leftJoin(fscClasses, eq(fscClasses.code, r.fsc))
       .where(where)
-      .orderBy(...ORDER[f.sort])
-      .limit(PAGE_SIZE)
-      .offset((f.page - 1) * PAGE_SIZE),
+      .orderBy(...orderBy(f))
+      .limit(f.size)
+      .offset((f.page - 1) * f.size),
     db.select({ total: sql<number>`count(*)::int` }).from(r).where(where),
   ]);
-  return { rows, total, pageCount: Math.max(1, Math.ceil(total / PAGE_SIZE)) };
+  return { rows, total, pageCount: Math.max(1, Math.ceil(total / f.size)) };
 }
 
 export type FacetOption = { value: string; count: number; name?: string | null };

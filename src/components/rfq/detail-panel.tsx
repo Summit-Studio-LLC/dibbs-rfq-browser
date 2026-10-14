@@ -1,7 +1,6 @@
-import { ExternalLinkIcon, FileTextIcon, XIcon } from "lucide-react";
-import Link from "next/link";
+import { ExternalLinkIcon, FileTextIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { type Filters, hrefWith, lineItemId } from "@/lib/rfqs/filters";
+import { lineItemId } from "@/lib/rfqs/filters";
 import {
   AMSC,
   daysBetween,
@@ -18,7 +17,8 @@ import type { RfqDetail } from "@/lib/rfqs/queries";
 import { cn } from "@/lib/utils";
 import { closingTone, relativeDays } from "./closing";
 import { CopyButton } from "./copy-button";
-import { SetAside } from "./results-list";
+import { SetAside } from "./badges";
+import { CloseDetailButton, SelectLink } from "./navigation";
 
 const FIELD_LABELS: Record<string, string> = {
   returnByDate: "Return-by date",
@@ -32,15 +32,12 @@ const FIELD_LABELS: Record<string, string> = {
   buyerCode: "Buyer",
 };
 
-export function DetailPanel({ item, filters, today }: { item: RfqDetail | null; filters: Filters; today: string }) {
-  const close = hrefWith(filters, { id: null });
+export function DetailPanel({ item, today }: { item: RfqDetail | null; today: string }) {
   if (!item) {
     return (
-      <div className="p-6 text-sm">
+      <div className="flex items-start justify-between gap-3 p-5 text-sm">
         <p className="font-semibold">That line item isn&apos;t in the loaded data.</p>
-        <Link href={close} scroll={false} className="mt-2 inline-block text-primary underline-offset-4 hover:underline">
-          Close
-        </Link>
+        <CloseDetailButton />
       </div>
     );
   }
@@ -59,11 +56,7 @@ export function DetailPanel({ item, filters, today }: { item: RfqDetail | null; 
             <span className="ml-1.5 truncate font-mono text-sm font-semibold">{item.solicitationNumber}</span>
             <CopyButton value={item.solicitationNumber} label="solicitation number" />
           </div>
-          <Button variant="ghost" size="icon-sm" asChild>
-            <Link href={close} scroll={false} aria-label="Close details">
-              <XIcon />
-            </Link>
-          </Button>
+          <CloseDetailButton />
         </div>
         <h2 className="mt-1.5 text-xl leading-snug font-semibold tracking-tight">{item.nomenclature.replace(/,+$/, "")}</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">
@@ -206,17 +199,16 @@ export function DetailPanel({ item, filters, today }: { item: RfqDetail | null; 
         {item.siblings.length > 0 && (
           <Group title={`Other lines on this solicitation · ${item.siblings.length}`}>
             {item.siblings.map((s) => (
-              <Link
+              <SelectLink
                 key={s.prNumber}
-                href={hrefWith(filters, { id: lineItemId(item.solicitationNumber, s.prNumber) })}
-                scroll={false}
+                id={lineItemId(item.solicitationNumber, s.prNumber)}
                 className="flex justify-between gap-3 px-3 py-2 text-sm hover:bg-accent/60"
               >
                 <span className="truncate font-medium">{s.nomenclature.replace(/,+$/, "")}</span>
                 <span className="shrink-0 text-muted-foreground tabular-nums">
                   {s.quantity.toLocaleString()} {s.unitOfIssue}
                 </span>
-              </Link>
+              </SelectLink>
             ))}
           </Group>
         )}
@@ -224,17 +216,16 @@ export function DetailPanel({ item, filters, today }: { item: RfqDetail | null; 
         {item.sameNsn.length > 0 && (
           <Group title="Other open RFQs for this NSN">
             {item.sameNsn.map((s) => (
-              <Link
+              <SelectLink
                 key={`${s.solicitationNumber}${s.prNumber}`}
-                href={hrefWith(filters, { id: lineItemId(s.solicitationNumber, s.prNumber) })}
-                scroll={false}
+                id={lineItemId(s.solicitationNumber, s.prNumber)}
                 className="flex justify-between gap-3 px-3 py-2 text-sm hover:bg-accent/60"
               >
                 <span className="font-mono font-medium">{s.solicitationNumber}</span>
                 <span className="shrink-0 text-muted-foreground tabular-nums">
                   {s.quantity.toLocaleString()} {s.unitOfIssue} · closes {formatDate(s.returnByDate)}
                 </span>
-              </Link>
+              </SelectLink>
             ))}
           </Group>
         )}

@@ -3,9 +3,11 @@ import { parseFilters, type RawParams } from "@/lib/rfqs/filters";
 import { formatDate, todayEastern } from "@/lib/rfqs/labels";
 import { getFacets, getFreshness, getRfqDetail, searchRfqs } from "@/lib/rfqs/queries";
 import { cn } from "@/lib/utils";
+import { DetailLayout } from "./detail-layout";
 import { DetailPanel } from "./detail-panel";
 import { FilterBar } from "./filter-bar";
-import { ResultsList } from "./results-list";
+import { NavigationProvider } from "./navigation";
+import { ResultsTable } from "./results-table";
 
 const PAGE = "mx-auto w-full max-w-[1680px] px-4 sm:px-6 lg:px-8";
 
@@ -20,24 +22,14 @@ export async function Browser({ searchParams }: { searchParams: Promise<RawParam
   ]);
 
   return (
-    <div className={cn("group flex min-h-0 flex-1 flex-col gap-4 py-5", PAGE)}>
-      <FilterBar filters={filters} facets={facets} total={results.total} />
-      <div
-        className={cn(
-          "flex min-h-0 flex-1 flex-col gap-4 lg:grid lg:grid-rows-[minmax(0,1fr)]",
-          detail !== undefined && "lg:grid-cols-[minmax(0,1fr)_minmax(26rem,32rem)]",
-        )}
-      >
-        <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border bg-card shadow-sm transition-opacity group-has-data-filtering:opacity-60">
-          <ResultsList rows={results.rows} filters={filters} today={today} total={results.total} pageCount={results.pageCount} />
-        </section>
-        {detail !== undefined && (
-          <aside className="fixed inset-0 z-40 overflow-y-auto bg-card transition-opacity group-has-data-selecting:opacity-60 lg:static lg:z-auto lg:rounded-xl lg:border lg:shadow-sm">
-            <DetailPanel item={detail} filters={filters} today={today} />
-          </aside>
-        )}
+    <NavigationProvider filters={filters}>
+      <div className={cn("flex flex-1 flex-col gap-4 py-4 md:min-h-0", PAGE)}>
+        <FilterBar facets={facets} today={today} />
+        <DetailLayout detailId={filters.id} detail={detail !== undefined ? <DetailPanel item={detail} today={today} /> : null}>
+          <ResultsTable rows={results.rows} total={results.total} pageCount={results.pageCount} today={today} />
+        </DetailLayout>
       </div>
-    </div>
+    </NavigationProvider>
   );
 }
 
