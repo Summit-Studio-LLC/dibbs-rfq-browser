@@ -396,3 +396,8 @@ decision points. Noah's answers:
   - Proof: the agent diffed 44 URL scenarios byte-for-byte before vs after. I re-checked 7 views
     in a browser, local build vs production: identical counts, row order and matched parts.
   - Still Noah's call: setting `CRON_SECRET` in Vercel. Until then the cron gets a harmless 401.
+- **Self-review for the interviewer.** Noah: "can i get a review on how i did base don the reqs
+  for this i can copy and give to the inverwer, expalinign strenghts and weakensses." Claude wrote
+  a requirement-by-requirement review, labelled as written by the AI pair, including the gaps:
+  the README is still boilerplate, there are no automated tests, the cron secret isn't set, only
+  4 of 23 archive days are loaded, and Noah found several UI bugs in hands-on testing.
