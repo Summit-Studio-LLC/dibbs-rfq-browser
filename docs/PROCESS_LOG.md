@@ -401,3 +401,10 @@ decision points. Noah's answers:
   a requirement-by-requirement review, labelled as written by the AI pair, including the gaps:
   the README is still boilerplate, there are no automated tests, the cron secret isn't set, only
   4 of 23 archive days are loaded, and Noah found several UI bugs in hands-on testing.
+- **Clarified: a review of Noah, not the app.** Noah: "no no, weaknesses and strengths of ME who
+  helped you build this." Claude wrote a candid review of Noah as a collaborator, grounded in this
+  log.
+  - Strengths: framing and scoping, insisting on first-hand data, evidence-seeking pushback on
+    amendments, precise bug reports, early deploys, and asking for measurements.
+  - Weaknesses: late-timebox polish over the README, tests and data coverage; batched asks and
+    mid-task interrupts; decisions left open (cron secret, backfill depth, retention).
