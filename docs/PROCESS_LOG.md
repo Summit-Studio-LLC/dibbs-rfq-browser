@@ -369,3 +369,12 @@ decision points. Noah's answers:
   - Known gap: the daily files don't signal cancellations or awards. Handling those needs a
     separate, rate-limited status check per open RFQ.
   - Open questions for Noah: backfill depth, date-only vs status checks, and retention.
+- **Resize bug.** Noah: "column resizing is resizing the wrong column index, the second
+  dividiever, adjusts the difference betweenthe first and second columns, not the seconda nd
+  thrid."
+  - Cause: the table is 100% wide and the flexible Item column (first) absorbs slack. Widening
+    column 2 shrank Item by the same amount, so divider 1 moved and divider 2 stayed put.
+  - Fix (spreadsheet behaviour): the first real resize pins Item at its rendered width, and a
+    filler column at the end takes the slack. Double-clicking Item's edge makes it fill again.
+  - Verified by measuring every divider mid-drag in Playwright: the dragged edge moves exactly
+    the drag distance, columns to its left don't move, and columns to its right shift.

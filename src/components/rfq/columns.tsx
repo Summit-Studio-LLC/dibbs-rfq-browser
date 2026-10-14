@@ -34,7 +34,7 @@ export type ColumnDef = {
   align?: "right";
   /** Fixed width in px; the item column takes the remaining space. */
   width?: number;
-  /** The flexible item column never gets narrower than this. */
+  /** While the item column is flexible (no saved width), it never gets narrower than this. */
   minWidth?: number;
   hideable: boolean;
   cell: (ctx: CellContext) => React.ReactNode;
@@ -247,12 +247,15 @@ const DEFAULT_HIDDEN: ColumnId[] = ["sources", "delivery", "posted", "fsc", "ams
 
 // ── Column preferences (order + visibility), remembered per browser ─────────────────
 
-/** Order, hidden columns, and widths the user dragged (the item column's entry is its minimum). */
+/**
+ * Order, hidden columns, and widths the user dragged. The item column fills the spare room
+ * until it has a saved width; then every column is fixed and a filler takes the slack.
+ */
 export type ColumnPrefs = { order: ColumnId[]; hidden: ColumnId[]; widths: Partial<Record<ColumnId, number>> };
 
 export const MIN_COLUMN_WIDTH = 72;
-export const MAX_COLUMN_WIDTH = 640;
-export const clampWidth = (w: number) => Math.round(Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, w)));
+export const maxWidth = (id: ColumnId) => (id === "item" ? 1600 : 640);
+const clampWidth = (id: ColumnId, w: number) => Math.round(Math.min(maxWidth(id), Math.max(MIN_COLUMN_WIDTH, w)));
 
 const STORAGE_KEY = "dibbs-rfq:columns:v1";
 const listeners = new Set<() => void>();
@@ -297,7 +300,7 @@ function normalize(raw: string | null): ColumnPrefs {
     for (const id of DEFAULT_ORDER) if (!order.includes(id)) order.push(id); // columns added since the prefs were saved
     const hidden = (parsed.hidden ?? []).filter((id): id is ColumnId => known(id) && COLUMN_BY_ID[id].hideable);
     const widths: ColumnPrefs["widths"] = {};
-    for (const [id, w] of Object.entries(parsed.widths ?? {})) if (known(id) && typeof w === "number" && w > 0) widths[id] = clampWidth(w);
+    for (const [id, w] of Object.entries(parsed.widths ?? {})) if (known(id) && typeof w === "number" && w > 0) widths[id] = clampWidth(id, w);
     return { order, hidden, widths };
   } catch {
     return fallback;
@@ -310,6 +313,15 @@ export function useColumnPrefs() {
   const prefs = useMemo(() => normalize(raw), [raw]);
   // Merges into what's stored now, so a reorder doesn't drop widths saved a moment ago.
   const save = useCallback((patch: Partial<ColumnPrefs>) => writePrefs(JSON.stringify({ ...normalize(readPrefs()), ...patch })), []);
+  /** Sets (or with undefined, clears) one column's width against the stored prefs. Returns the clamped width. */
+  const setWidth = useCallback((id: ColumnId, width: number | undefined) => {
+    const current = normalize(readPrefs());
+    const widths = { ...current.widths };
+    if (width === undefined) delete widths[id];
+    else widths[id] = clampWidth(id, width);
+    writePrefs(JSON.stringify({ ...current, widths }));
+    return widths[id];
+  }, []);
   const reset = useCallback(() => writePrefs(null), []);
   const visible = useMemo(
     () =>
@@ -318,10 +330,9 @@ export function useColumnPrefs() {
         .map((id): ColumnDef => {
           const def = COLUMN_BY_ID[id];
           const w = prefs.widths[id];
-          if (!w) return def;
-          return def.width !== undefined ? { ...def, width: w } : { ...def, minWidth: w };
+          return w ? { ...def, width: w } : def;
         }),
     [prefs],
   );
-  return { ...prefs, visible, save, reset, isDefault: raw === null };
+  return { ...prefs, visible, save, setWidth, reset, isDefault: raw === null };
 }

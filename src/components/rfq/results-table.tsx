@@ -64,7 +64,7 @@ import type { RfqRow } from "@/lib/rfqs/queries";
 import { cn } from "@/lib/utils";
 import { SetAside } from "./badges";
 import { Closing } from "./closing";
-import { clampWidth, COLUMN_BY_ID, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, type ColumnDef, type ColumnId, directionLabel, useColumnPrefs } from "./columns";
+import { COLUMN_BY_ID, maxWidth, MIN_COLUMN_WIDTH, type ColumnDef, type ColumnId, directionLabel, useColumnPrefs } from "./columns";
 import { isTypingTarget } from "./hooks";
 import { isModifiedClick, SelectLink, useNav } from "./navigation";
 import { ResponsivePopover } from "./responsive-popover";
@@ -174,6 +174,8 @@ function DataTable({ rows, ids, columns, today }: { rows: RfqRow[]; ids: string[
   );
   const visible = columns.visible;
   const minWidth = visible.reduce((sum, c) => sum + (c.width ?? c.minWidth ?? 0), 0);
+  // Every column has a width once the user resizes; then a trailing filler takes the slack.
+  const filler = visible.every((c) => c.width !== undefined);
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     justDragged.current = true;
@@ -194,6 +196,7 @@ function DataTable({ rows, ids, columns, today }: { rows: RfqRow[]; ids: string[
           {visible.map((c) => (
             <col key={c.id} data-col={c.id} style={c.width ? { width: c.width } : undefined} />
           ))}
+          {filler && <col />}
         </colgroup>
         <thead>
           <tr>
@@ -202,6 +205,7 @@ function DataTable({ rows, ids, columns, today }: { rows: RfqRow[]; ids: string[
                 <HeaderCell key={c.id} column={c} index={i} columns={columns} sticky={i === 0} onSort={onSort} />
               ))}
             </SortableContext>
+            {filler && <th aria-hidden className="sticky top-0 z-20 border-b bg-muted p-0" />}
           </tr>
         </thead>
         <tbody>
@@ -246,6 +250,7 @@ function DataTable({ rows, ids, columns, today }: { rows: RfqRow[]; ids: string[
                     )}
                   </td>
                 ))}
+                {filler && <td aria-hidden className="border-b p-0" style={{ backgroundColor: "var(--row-bg)" }} />}
               </tr>
             );
           })}
@@ -291,6 +296,7 @@ function HeaderCell({
     <th
       ref={setNodeRef}
       scope="col"
+      data-col={column.id}
       aria-sort={level === 0 ? (spec?.desc ? "descending" : "ascending") : undefined}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       {...pointerListeners}
@@ -336,21 +342,33 @@ function HeaderCell({
 }
 
 /**
- * Drag a header's right edge to resize (double-click resets, arrow keys nudge). The drag
- * writes straight to the <col> so 50 rows don't re-render per pointer move; the width is
- * saved on release. The item column is flexible, so its handle sets its minimum instead.
+ * Drag a header's right edge to resize (double-click resets, arrow keys nudge).
+ *
+ * The item column is the flexible one and sits left of every edge, so on its own it would
+ * soak up the change and the wrong divider would move. The first real resize pins it at its
+ * rendered width; from then on a filler column at the end takes the slack, and the dragged
+ * edge tracks the pointer while the columns to its right shift. Double-click the item edge
+ * to make it fill again. The drag writes straight to the <col>, so 50 rows don't re-render
+ * per pointer move; the width is saved on release.
  */
 function ResizeHandle({ column, columns }: { column: ColumnDef; columns: Prefs }) {
-  const drag = useRef<{ x: number; width: number; tableMin: number; own: number } | null>(null);
+  const drag = useRef<{ x: number; width: number } | null>(null);
   const [active, setActive] = useState(false);
-  const own = column.width ?? column.minWidth ?? 0;
-  const save = (width: number) => columns.save({ widths: { ...columns.widths, [column.id]: clampWidth(width) } });
-
-  const preview = (target: HTMLElement, width: number) => {
-    const table = target.closest("table");
-    if (!table || !drag.current) return;
-    if (column.width !== undefined) table.querySelector<HTMLElement>(`col[data-col="${column.id}"]`)?.style.setProperty("width", `${width}px`);
-    table.style.minWidth = `${drag.current.tableMin - drag.current.own + width}px`;
+  const clamp = (w: number) => Math.round(Math.min(maxWidth(column.id), Math.max(MIN_COLUMN_WIDTH, w)));
+  const parts = (el: HTMLElement) => {
+    const th = el.closest("th")!;
+    return { th, table: th.closest("table")! };
+  };
+  const pinItem = (table: HTMLTableElement) => {
+    if (columns.widths.item !== undefined) return;
+    const item = table.querySelector('th[data-col="item"]');
+    if (item) columns.setWidth("item", item.getBoundingClientRect().width);
+  };
+  const preview = (table: HTMLTableElement, width: number) => {
+    table.querySelector<HTMLElement>(`col[data-col="${column.id}"]`)?.style.setProperty("width", `${width}px`);
+    let sum = 0;
+    for (const col of table.querySelectorAll<HTMLElement>("col[data-col]")) sum += parseFloat(col.style.width) || 0;
+    table.style.minWidth = `${sum}px`;
   };
 
   return (
@@ -358,9 +376,9 @@ function ResizeHandle({ column, columns }: { column: ColumnDef; columns: Prefs }
       role="separator"
       aria-orientation="vertical"
       aria-label={`Resize ${column.label} column`}
-      aria-valuenow={own}
+      aria-valuenow={column.width ?? column.minWidth}
       aria-valuemin={MIN_COLUMN_WIDTH}
-      aria-valuemax={MAX_COLUMN_WIDTH}
+      aria-valuemax={maxWidth(column.id)}
       tabIndex={0}
       title="Drag to resize · double-click to reset"
       onPointerDown={(e) => {
@@ -368,34 +386,34 @@ function ResizeHandle({ column, columns }: { column: ColumnDef; columns: Prefs }
         e.preventDefault();
         e.stopPropagation(); // not a column drag or a sort click
         e.currentTarget.setPointerCapture(e.pointerId);
-        const th = e.currentTarget.closest("th")!;
-        const table = th.closest("table")!;
-        drag.current = { x: e.clientX, width: th.getBoundingClientRect().width, tableMin: parseFloat(table.style.minWidth) || 0, own };
+        drag.current = { x: e.clientX, width: parts(e.currentTarget).th.getBoundingClientRect().width };
         setActive(true);
       }}
       onPointerMove={(e) => {
-        if (!drag.current) return;
-        preview(e.currentTarget, clampWidth(drag.current.width + e.clientX - drag.current.x));
+        if (!drag.current || e.clientX === drag.current.x) return;
+        const { table } = parts(e.currentTarget);
+        pinItem(table);
+        preview(table, clamp(drag.current.width + e.clientX - drag.current.x));
       }}
       onPointerUp={(e) => {
         if (!drag.current) return;
-        const width = clampWidth(drag.current.width + e.clientX - drag.current.x);
+        const { x, width } = drag.current;
         drag.current = null;
         setActive(false);
-        if (width !== own) save(width);
+        if (e.clientX !== x) columns.setWidth(column.id, clamp(width + e.clientX - x));
       }}
       onPointerCancel={() => {
         drag.current = null;
         setActive(false);
       }}
-      onDoubleClick={() => {
-        columns.save({ widths: Object.fromEntries(Object.entries(columns.widths).filter(([id]) => id !== column.id)) });
-      }}
+      onDoubleClick={() => columns.setWidth(column.id, undefined)}
       onKeyDown={(e) => {
         if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
         e.preventDefault();
         e.stopPropagation();
-        save(own + (e.key === "ArrowRight" ? 16 : -16));
+        const { th, table } = parts(e.currentTarget);
+        pinItem(table);
+        columns.setWidth(column.id, th.getBoundingClientRect().width + (e.key === "ArrowRight" ? 16 : -16));
       }}
       className="group/resize absolute inset-y-0 right-0 z-10 flex w-2.5 cursor-col-resize touch-none justify-end outline-none"
     >
