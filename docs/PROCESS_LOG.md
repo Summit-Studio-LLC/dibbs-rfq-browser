@@ -213,3 +213,29 @@ decision points. Noah's answers:
   9,818 line items, 9,483 solicitations, 11,631 approved sources, 100% `bq` coverage, in 10 s.
 - **Query timings from a laptop (incl. network):** 30–60 ms for keyword + set-aside + open-only,
   partial words, NSN fragments, and approved part # lookups.
+
+## 14. UI decisions approved, first UI shipped
+- **Claude proposed:** a table plus side panel with two-line rows. Filters live in the URL, so
+  views are shareable and the back button works. Facet counts on every filter. Up-front
+  filters: closing window, set-aside, supply class (FSC), award type. "More filters" holds
+  posted day, quantity, required delivery, inspection point, buying office, AMSC, has approved
+  sources, and include closed. The default view shows open RFQs, closing soonest. Each row links
+  to its DIBBS record page and its PDF.
+- **Noah:** "table layout, yes, those look good for now, yes"
+- **Noah, mid-build:** "Can you please push to vercel so I can begin seeing what the UI looks
+  like and iterate on it?" and "you can parallelize if need be with subagents". Claude kept it
+  to one thread because the remaining work was a sequential build → push → verify. Subagents are
+  saved for parallel UI iteration once Noah has reacted.
+- **Built:**
+  - Facet counts ignore each facet's own filter, so you see what you'd get by switching
+    options. All 9 queries run in parallel.
+  - The search box auto-detects dashed NSNs. A row that matched only through an approved
+    part # or CAGE says so ("Matched approved part C91PBBK2S · CAGE 0ZKZ2").
+  - Optimistic filter and row-selection state (the Next 16 `useOptimistic` + `data-pending`
+    pattern), so the list dims instead of flashing a spinner.
+  - The detail panel shows DIBBS record, PDF, quote, and tech-doc links, approved sources,
+    change history, other lines on the same solicitation, and other open RFQs for the same NSN.
+- **Gotcha fixed:** with Cache Components on, reading "today" (`new Date()`) during prerender
+  throws. Fixed with `await connection()` before the clock read, inside the Suspense boundary.
+- **Production:** live at https://salespatriot-bay.vercel.app about 24 s after push. Full page
+  loads take 0.2–0.35 s.
