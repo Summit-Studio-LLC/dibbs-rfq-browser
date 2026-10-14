@@ -13,6 +13,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   ArrowDownIcon,
+  ArrowUpDownIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
   ArrowUpIcon,
@@ -31,7 +32,7 @@ import {
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -47,6 +48,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   DEFAULT_FILTERS,
+  DEFAULT_SORT,
   DESC_FIRST,
   lineItemId,
   MAX_SORTS,
@@ -62,15 +64,15 @@ import type { RfqRow } from "@/lib/rfqs/queries";
 import { cn } from "@/lib/utils";
 import { SetAside } from "./badges";
 import { Closing } from "./closing";
-import { COLUMN_BY_ID, type ColumnDef, type ColumnId, directionLabel, useColumnPrefs } from "./columns";
+import { clampWidth, COLUMN_BY_ID, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, type ColumnDef, type ColumnId, directionLabel, useColumnPrefs } from "./columns";
 import { isTypingTarget } from "./hooks";
 import { isModifiedClick, SelectLink, useNav } from "./navigation";
+import { ResponsivePopover } from "./responsive-popover";
 
 type Prefs = ReturnType<typeof useColumnPrefs>;
 
 const ROW_BG = "[--row-bg:var(--card)] hover:[--row-bg:color-mix(in_oklab,var(--accent)_70%,var(--card))]";
 const SELECTED_BG = "[--row-bg:color-mix(in_oklab,var(--primary)_8%,var(--card))]";
-const ITEM_MIN_WIDTH = 240;
 
 export function ResultsTable({ rows, total, pageCount, today }: { rows: RfqRow[]; total: number; pageCount: number; today: string }) {
   const { f, committed, pending, select, apply } = useNav();
@@ -108,7 +110,7 @@ export function ResultsTable({ rows, total, pageCount, today }: { rows: RfqRow[]
   });
 
   return (
-    <section ref={cardRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
+    <section ref={cardRef} className="relative flex min-h-0 flex-1 flex-col overflow-clip rounded-xl border bg-card shadow-sm md:overflow-hidden">
       <ProgressBar active={listPending} />
       <Toolbar total={total} count={rows.length} pageCount={pageCount} columns={columns} />
       {rows.length ? (
@@ -126,6 +128,7 @@ export function ResultsTable({ rows, total, pageCount, today }: { rows: RfqRow[]
             <CardList rows={rows} ids={ids} today={today} />
           </div>
           <Pager total={total} pageCount={pageCount} count={rows.length} />
+          {pageCount > 1 && <PhonePager total={total} pageCount={pageCount} />}
         </>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center px-4 py-20 text-center">
@@ -170,7 +173,7 @@ function DataTable({ rows, ids, columns, today }: { rows: RfqRow[]; ids: string[
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const visible = columns.visible;
-  const minWidth = visible.reduce((sum, c) => sum + (c.width ?? ITEM_MIN_WIDTH), 0);
+  const minWidth = visible.reduce((sum, c) => sum + (c.width ?? c.minWidth ?? 0), 0);
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     justDragged.current = true;
@@ -189,7 +192,7 @@ function DataTable({ rows, ids, columns, today }: { rows: RfqRow[]; ids: string[
       <table className="hidden w-full table-fixed border-separate border-spacing-0 text-sm md:table" style={{ minWidth }}>
         <colgroup>
           {visible.map((c) => (
-            <col key={c.id} style={c.width ? { width: c.width } : undefined} />
+            <col key={c.id} data-col={c.id} style={c.width ? { width: c.width } : undefined} />
           ))}
         </colgroup>
         <thead>
@@ -220,8 +223,15 @@ function DataTable({ rows, ids, columns, today }: { rows: RfqRow[]; ids: string[
                 {visible.map((c, i) => (
                   <td
                     key={c.id}
+                    style={{
+                      transform: `var(--dx-${c.id}, none)`,
+                      transition: `var(--dt-${c.id}, background-color 150ms)`,
+                      backgroundColor: `var(--dbg-${c.id}, var(--row-bg))`,
+                      zIndex: i === 0 ? undefined : `var(--dz-${c.id}, auto)`,
+                    }}
                     className={cn(
-                      "border-b bg-(--row-bg) px-3 py-2.5 align-middle transition-colors duration-150",
+                      "border-b px-3 py-2.5 align-middle",
+                      i !== 0 && "relative",
                       c.align === "right" && "text-right",
                       i === 0 &&
                         "sticky left-0 z-10 before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-primary before:opacity-0 before:transition-opacity group-aria-selected/row:before:opacity-100 after:pointer-events-none after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-linear-to-r after:from-foreground/8 after:to-transparent after:opacity-0 after:transition-opacity group-data-scrolled-x/scroll:after:opacity-100",
@@ -259,8 +269,21 @@ function HeaderCell({
   onSort: (key: SortKey, additive: boolean) => void;
 }) {
   const { f } = useNav();
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: column.id });
+  const { attributes, listeners, node, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: column.id });
   const { onKeyDown, ...pointerListeners } = listeners ?? {};
+
+  // Body cells mirror this header's drag transform through CSS variables on the table,
+  // so 50+ rows follow the drag without re-rendering.
+  useLayoutEffect(() => {
+    const style = node.current?.closest("table")?.style;
+    if (!style) return;
+    const set = (name: string, value: string | null | undefined) =>
+      value ? style.setProperty(`--${name}-${column.id}`, value) : style.removeProperty(`--${name}-${column.id}`);
+    set("dx", CSS.Translate.toString(transform));
+    set("dt", transition);
+    set("dz", isDragging ? "5" : null);
+    set("dbg", isDragging ? "color-mix(in oklab, var(--primary) 7%, var(--card))" : null);
+  });
   const level = column.sortKey ? f.sort.findIndex((s) => s.key === column.sortKey) : -1;
   const spec = level >= 0 ? f.sort[level] : undefined;
 
@@ -307,12 +330,87 @@ function HeaderCell({
         )}
         <ColumnMenu column={column} index={index} columns={columns} />
       </div>
+      <ResizeHandle column={column} columns={columns} />
     </th>
   );
 }
 
+/**
+ * Drag a header's right edge to resize (double-click resets, arrow keys nudge). The drag
+ * writes straight to the <col> so 50 rows don't re-render per pointer move; the width is
+ * saved on release. The item column is flexible, so its handle sets its minimum instead.
+ */
+function ResizeHandle({ column, columns }: { column: ColumnDef; columns: Prefs }) {
+  const drag = useRef<{ x: number; width: number; tableMin: number; own: number } | null>(null);
+  const [active, setActive] = useState(false);
+  const own = column.width ?? column.minWidth ?? 0;
+  const save = (width: number) => columns.save({ widths: { ...columns.widths, [column.id]: clampWidth(width) } });
+
+  const preview = (target: HTMLElement, width: number) => {
+    const table = target.closest("table");
+    if (!table || !drag.current) return;
+    if (column.width !== undefined) table.querySelector<HTMLElement>(`col[data-col="${column.id}"]`)?.style.setProperty("width", `${width}px`);
+    table.style.minWidth = `${drag.current.tableMin - drag.current.own + width}px`;
+  };
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={`Resize ${column.label} column`}
+      aria-valuenow={own}
+      aria-valuemin={MIN_COLUMN_WIDTH}
+      aria-valuemax={MAX_COLUMN_WIDTH}
+      tabIndex={0}
+      title="Drag to resize · double-click to reset"
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation(); // not a column drag or a sort click
+        e.currentTarget.setPointerCapture(e.pointerId);
+        const th = e.currentTarget.closest("th")!;
+        const table = th.closest("table")!;
+        drag.current = { x: e.clientX, width: th.getBoundingClientRect().width, tableMin: parseFloat(table.style.minWidth) || 0, own };
+        setActive(true);
+      }}
+      onPointerMove={(e) => {
+        if (!drag.current) return;
+        preview(e.currentTarget, clampWidth(drag.current.width + e.clientX - drag.current.x));
+      }}
+      onPointerUp={(e) => {
+        if (!drag.current) return;
+        const width = clampWidth(drag.current.width + e.clientX - drag.current.x);
+        drag.current = null;
+        setActive(false);
+        if (width !== own) save(width);
+      }}
+      onPointerCancel={() => {
+        drag.current = null;
+        setActive(false);
+      }}
+      onDoubleClick={() => {
+        columns.save({ widths: Object.fromEntries(Object.entries(columns.widths).filter(([id]) => id !== column.id)) });
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+        e.preventDefault();
+        e.stopPropagation();
+        save(own + (e.key === "ArrowRight" ? 16 : -16));
+      }}
+      className="group/resize absolute inset-y-0 right-0 z-10 flex w-2.5 cursor-col-resize touch-none justify-end outline-none"
+    >
+      <span
+        className={cn(
+          "my-2 w-0.5 rounded-full bg-border transition-colors group-hover/resize:bg-primary/60 group-focus-visible/resize:bg-primary",
+          active && "bg-primary",
+        )}
+      />
+    </div>
+  );
+}
+
 function SortIcon({ spec, level, multi }: { spec?: SortSpec; level: number; multi: boolean }) {
-  if (!spec) return <ChevronsUpDownIcon className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover/th:opacity-60" />;
+  if (!spec) return <ChevronsUpDownIcon className="hidden size-3.5 shrink-0 opacity-60 group-hover/th:block" />;
   return (
     <span className="inline-flex shrink-0 items-center gap-0.5 text-primary">
       <ArrowUpIcon className={cn("size-3.5 transition-transform duration-200", spec.desc && "rotate-180")} />
@@ -476,7 +574,7 @@ function Toolbar({ total, count, pageCount, columns }: { total: number; count: n
             )}
           </span>
         ))}
-        <AddSort />
+        <SortEditor />
       </div>
 
       <div className="ml-auto flex items-center gap-1.5">
@@ -493,46 +591,97 @@ function Toolbar({ total, count, pageCount, columns }: { total: number; count: n
             ))}
           </SelectContent>
         </Select>
-        {pageCount > 1 && <CompactPager pageCount={pageCount} />}
+        {pageCount > 1 && (
+          <div className="hidden md:block">
+            <CompactPager pageCount={pageCount} />
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-/** "+ Sort" menu: on phones it's the only way to sort; on desktop it complements Shift+click. */
-function AddSort() {
+/** Sort editor: up to three levels, each with a column and a direction. On phones it's a bottom drawer. */
+function SortEditor() {
   const { f, apply } = useNav();
-  const used = new Set(f.sort.map((s) => s.key));
+  const sort = f.sort;
+  const set = (next: SortSpec[]) => apply({ sort: next });
+  const unused = (Object.keys(SORT_LABELS) as SortKey[]).filter((key) => !sort.some((s) => s.key === key));
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <ResponsivePopover
+      title="Sort"
+      description={`Up to ${MAX_SORTS} levels. Each level breaks ties in the one above it.`}
+      align="start"
+      className="w-[min(28rem,calc(100vw-2rem))]"
+      trigger={
         <Button variant="ghost" size="xs" className="text-muted-foreground">
-          <ChevronsUpDownIcon /> Sort
+          <ArrowUpDownIcon /> Edit sort
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-80 w-56 border shadow-xl shadow-foreground/10">
-        <DropdownMenuLabel className="text-xs text-muted-foreground">Sort by</DropdownMenuLabel>
-        {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
-          <DropdownMenuItem key={key} onSelect={() => apply({ sort: [{ key, desc: DESC_FIRST.has(key) }] })}>
-            {SORT_LABELS[key]}
-            {used.has(key) && <span className="ml-auto text-xs text-muted-foreground">current</span>}
-          </DropdownMenuItem>
+      }
+    >
+      <div className="space-y-2">
+        <p className="hidden text-sm font-semibold md:block">Sort</p>
+        {sort.map((s, i) => (
+          <div key={s.key} className="flex animate-in items-center gap-2 duration-150 fade-in-0 slide-in-from-top-1">
+            <span className="w-14 shrink-0 text-xs text-muted-foreground">{i === 0 ? "Sort by" : "then by"}</span>
+            <Select
+              value={s.key}
+              onValueChange={(value) => {
+                const key = value as SortKey;
+                set(sort.map((x, j) => (j === i ? { key, desc: DESC_FIRST.has(key) } : x)));
+              }}
+            >
+              <SelectTrigger size="sm" className="min-w-0 flex-1" aria-label={`Sort level ${i + 1} column`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+                  <SelectItem key={key} value={key} disabled={sort.some((x, j) => j !== i && x.key === key)}>
+                    {SORT_LABELS[key]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-36 justify-start"
+              onClick={() => set(sort.map((x, j) => (j === i ? { ...x, desc: !x.desc } : x)))}
+              aria-label={`Reverse sort level ${i + 1}`}
+            >
+              <ArrowUpIcon className={cn("transition-transform duration-200", s.desc && "rotate-180")} />
+              <span className="truncate">{directionLabel(s.key, s.desc)}</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              disabled={sort.length === 1}
+              aria-label={`Remove sort level ${i + 1}`}
+              onClick={() => set(sort.filter((_, j) => j !== i))}
+            >
+              <XIcon />
+            </Button>
+          </div>
         ))}
-        {f.sort.length < MAX_SORTS && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-xs text-muted-foreground">Then by</DropdownMenuLabel>
-            {(Object.keys(SORT_LABELS) as SortKey[])
-              .filter((key) => !used.has(key))
-              .map((key) => (
-                <DropdownMenuItem key={key} onSelect={() => apply({ sort: thenBy(f.sort, key) })}>
-                  <ListPlusIcon /> {SORT_LABELS[key]}
-                </DropdownMenuItem>
-              ))}
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+        <div className="flex items-center justify-between gap-2 pt-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={sort.length >= MAX_SORTS || !unused.length}
+            onClick={() => unused[0] && set(thenBy(sort, unused[0]))}
+          >
+            <ListPlusIcon /> Add level
+          </Button>
+          <Button variant="link" size="sm" onClick={() => set(DEFAULT_SORT)}>
+            Reset to closing date
+          </Button>
+        </div>
+        <p className="hidden border-t pt-2 text-xs text-muted-foreground md:block">
+          Tip: click a column header to sort by it; Shift+click adds it as the next level.
+        </p>
+      </div>
+    </ResponsivePopover>
   );
 }
 
@@ -691,10 +840,11 @@ function Pager({ total, pageCount, count }: { total: number; pageCount: number; 
   };
 
   return (
-    <nav aria-label="Pagination" className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t bg-card px-3 py-2">
+    <nav aria-label="Pagination" className="hidden shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t bg-card px-3 py-2 md:flex">
       <div className="min-w-0 space-y-0.5">
         <p className="hidden text-xs text-muted-foreground xl:block">
-          <Kbd>j</Kbd> <Kbd>k</Kbd> move · <Kbd>Esc</Kbd> close · <Kbd>/</Kbd> search · Shift+click a header for a second sort
+          <Kbd>j</Kbd> <Kbd>k</Kbd> move · <Kbd>Esc</Kbd> close · <Kbd>/</Kbd> search · Shift+click a header for a second sort · drag a
+          header edge to resize
         </p>
         <p className="text-sm text-muted-foreground tabular-nums">
           Showing{" "}
@@ -753,6 +903,50 @@ function Pager({ total, pageCount, count }: { total: number; pageCount: number; 
           </form>
         </div>
       )}
+    </nav>
+  );
+}
+
+/**
+ * Phones: one bar pinned to the bottom of the screen while the list is in view, with
+ * thumb-sized prev/next and a native page picker (the OS wheel/list) in the middle.
+ */
+function PhonePager({ total, pageCount }: { total: number; pageCount: number }) {
+  const { committed, f, pending, apply } = useNav();
+  const page = committed.page;
+  const size = committed.size;
+  const loading = pending === "page";
+  return (
+    <nav
+      aria-label="Pagination"
+      className="sticky bottom-0 z-30 flex items-center gap-2 border-t bg-card/95 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur md:hidden"
+    >
+      <PageLink page={page - 1} label="Previous page" disabled={page <= 1} variant="outline" className="size-11 shrink-0 [&_svg]:size-5">
+        <ChevronLeftIcon />
+      </PageLink>
+      <label className="relative flex h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg border bg-background text-sm tabular-nums has-focus-visible:ring-2 has-focus-visible:ring-ring">
+        {loading ? <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" /> : null}
+        <span className="truncate">
+          Page <span className="font-semibold">{(loading ? f.page : page).toLocaleString()}</span>
+          <span className="text-muted-foreground"> of {pageCount.toLocaleString()}</span>
+        </span>
+        <ChevronsUpDownIcon className="size-4 shrink-0 text-muted-foreground" />
+        <select
+          aria-label="Go to page"
+          value={page}
+          onChange={(e) => apply({ page: Number(e.target.value) })}
+          className="absolute inset-0 cursor-pointer appearance-none opacity-0"
+        >
+          {Array.from({ length: pageCount }, (_, i) => (
+            <option key={i} value={i + 1}>
+              Page {i + 1} · {(i * size + 1).toLocaleString()}–{Math.min(total, (i + 1) * size).toLocaleString()}
+            </option>
+          ))}
+        </select>
+      </label>
+      <PageLink page={page + 1} label="Next page" disabled={page >= pageCount} variant="outline" className="size-11 shrink-0 [&_svg]:size-5">
+        <ChevronRightIcon />
+      </PageLink>
     </nav>
   );
 }

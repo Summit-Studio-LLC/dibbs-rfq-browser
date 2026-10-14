@@ -34,6 +34,8 @@ export type ColumnDef = {
   align?: "right";
   /** Fixed width in px; the item column takes the remaining space. */
   width?: number;
+  /** The flexible item column never gets narrower than this. */
+  minWidth?: number;
   hideable: boolean;
   cell: (ctx: CellContext) => React.ReactNode;
 };
@@ -56,6 +58,7 @@ export const COLUMNS: ColumnDef[] = [
     id: "item",
     label: "Item",
     sortKey: "item",
+    minWidth: 240,
     hideable: false,
     cell: ({ row }) => (
       <div className="min-w-0">
@@ -71,7 +74,7 @@ export const COLUMNS: ColumnDef[] = [
     id: "solicitation",
     label: "Solicitation #",
     sortKey: "solicitation",
-    width: 160,
+    width: 168,
     hideable: true,
     cell: ({ row }) => <Mono value={row.solicitationNumber} label="solicitation number" />,
   },
@@ -101,7 +104,7 @@ export const COLUMNS: ColumnDef[] = [
     id: "setAside",
     label: "Set-aside",
     sortKey: "setAside",
-    width: 132,
+    width: 148,
     hideable: true,
     cell: ({ row }) => <SetAside code={row.setAside} />,
   },
@@ -109,7 +112,7 @@ export const COLUMNS: ColumnDef[] = [
     id: "type",
     label: "Award type",
     sortKey: "type",
-    width: 124,
+    width: 156,
     hideable: true,
     cell: ({ row }) => (
       <span className="truncate text-[13px]" title={SOLICITATION_TYPE_DESCRIPTIONS[row.solicitationType ?? ""]}>
@@ -122,7 +125,7 @@ export const COLUMNS: ColumnDef[] = [
     label: "Sources",
     sortKey: "sources",
     align: "right",
-    width: 116,
+    width: 140,
     hideable: true,
     cell: ({ row }) => (row.sourceCount ? <span className="tabular-nums">{row.sourceCount}</span> : muted("—")),
   },
@@ -131,7 +134,7 @@ export const COLUMNS: ColumnDef[] = [
     label: "Delivery",
     sortKey: "delivery",
     align: "right",
-    width: 120,
+    width: 140,
     hideable: true,
     cell: ({ row }) => (row.requiredDeliveryDays !== null ? <span className="tabular-nums">{row.requiredDeliveryDays}d</span> : muted("—")),
   },
@@ -153,7 +156,7 @@ export const COLUMNS: ColumnDef[] = [
     id: "posted",
     label: "Posted",
     sortKey: "posted",
-    width: 112,
+    width: 132,
     hideable: true,
     cell: ({ row }) => <span className="text-[13px] tabular-nums">{formatDate(row.postedDate)}</span>,
   },
@@ -176,7 +179,7 @@ export const COLUMNS: ColumnDef[] = [
     id: "amsc",
     label: "AMSC",
     sortKey: "amsc",
-    width: 100,
+    width: 112,
     hideable: true,
     cell: ({ row }) =>
       row.amsc ? (
@@ -191,7 +194,7 @@ export const COLUMNS: ColumnDef[] = [
     id: "inspection",
     label: "Inspection",
     sortKey: "inspection",
-    width: 124,
+    width: 152,
     hideable: true,
     cell: ({ row }) => <span className="text-[13px]">{POINTS[row.inspectionPoint ?? ""] ?? "—"}</span>,
   },
@@ -238,13 +241,18 @@ const SORT_KIND: Record<SortKey, [asc: string, desc: string]> = {
 /** "earliest first", "largest first"… for sort menus and chip tooltips. */
 export const directionLabel = (key: SortKey, desc: boolean) => SORT_KIND[key][desc ? 1 : 0];
 
-export const COLUMN_BY_ID =Object.fromEntries(COLUMNS.map((c) => [c.id, c])) as Record<ColumnId, ColumnDef>;
+export const COLUMN_BY_ID = Object.fromEntries(COLUMNS.map((c) => [c.id, c])) as Record<ColumnId, ColumnDef>;
 const DEFAULT_ORDER = COLUMNS.map((c) => c.id);
 const DEFAULT_HIDDEN: ColumnId[] = ["sources", "delivery", "posted", "fsc", "amsc", "inspection", "office", "pr"];
 
 // ── Column preferences (order + visibility), remembered per browser ─────────────────
 
-export type ColumnPrefs = { order: ColumnId[]; hidden: ColumnId[] };
+/** Order, hidden columns, and widths the user dragged (the item column's entry is its minimum). */
+export type ColumnPrefs = { order: ColumnId[]; hidden: ColumnId[]; widths: Partial<Record<ColumnId, number>> };
+
+export const MIN_COLUMN_WIDTH = 72;
+export const MAX_COLUMN_WIDTH = 640;
+export const clampWidth = (w: number) => Math.round(Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, w)));
 
 const STORAGE_KEY = "dibbs-rfq:columns:v1";
 const listeners = new Set<() => void>();
@@ -280,7 +288,7 @@ function subscribe(onChange: () => void) {
 }
 
 function normalize(raw: string | null): ColumnPrefs {
-  const fallback = { order: DEFAULT_ORDER, hidden: DEFAULT_HIDDEN };
+  const fallback = { order: DEFAULT_ORDER, hidden: DEFAULT_HIDDEN, widths: {} };
   if (!raw) return fallback;
   try {
     const parsed = JSON.parse(raw) as Partial<ColumnPrefs>;
@@ -288,18 +296,32 @@ function normalize(raw: string | null): ColumnPrefs {
     const order = [...new Set((parsed.order ?? []).filter(known))];
     for (const id of DEFAULT_ORDER) if (!order.includes(id)) order.push(id); // columns added since the prefs were saved
     const hidden = (parsed.hidden ?? []).filter((id): id is ColumnId => known(id) && COLUMN_BY_ID[id].hideable);
-    return { order, hidden };
+    const widths: ColumnPrefs["widths"] = {};
+    for (const [id, w] of Object.entries(parsed.widths ?? {})) if (known(id) && typeof w === "number" && w > 0) widths[id] = clampWidth(w);
+    return { order, hidden, widths };
   } catch {
     return fallback;
   }
 }
 
-/** Column order and visibility from localStorage; SSR and first paint use the defaults. */
+/** Column order, visibility and widths from localStorage; SSR and first paint use the defaults. */
 export function useColumnPrefs() {
   const raw = useSyncExternalStore(subscribe, readPrefs, () => null);
   const prefs = useMemo(() => normalize(raw), [raw]);
-  const save = useCallback((next: ColumnPrefs) => writePrefs(JSON.stringify(next)), []);
+  // Merges into what's stored now, so a reorder doesn't drop widths saved a moment ago.
+  const save = useCallback((patch: Partial<ColumnPrefs>) => writePrefs(JSON.stringify({ ...normalize(readPrefs()), ...patch })), []);
   const reset = useCallback(() => writePrefs(null), []);
-  const visible = prefs.order.filter((id) => !prefs.hidden.includes(id)).map((id) => COLUMN_BY_ID[id]);
+  const visible = useMemo(
+    () =>
+      prefs.order
+        .filter((id) => !prefs.hidden.includes(id))
+        .map((id): ColumnDef => {
+          const def = COLUMN_BY_ID[id];
+          const w = prefs.widths[id];
+          if (!w) return def;
+          return def.width !== undefined ? { ...def, width: w } : { ...def, minWidth: w };
+        }),
+    [prefs],
+  );
   return { ...prefs, visible, save, reset, isDefault: raw === null };
 }
