@@ -7,6 +7,7 @@ export const SORTS = { closing: "Closing soonest", newest: "Newest posted", qty:
 export type Sort = keyof typeof SORTS;
 
 export const CLOSING_WINDOWS = [3, 7, 14] as const;
+export const PAGE_SIZE = 50;
 
 export type Filters = {
   q: string;

@@ -54,7 +54,7 @@ export function FacetSelect({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className={cn("max-w-64", selected.length && "border-primary/40 bg-primary/5", className)}>
+        <Button variant="outline" size="sm" className={cn("max-w-64 bg-card", selected.length && "border-primary/40 bg-accent text-accent-foreground", className)}>
           <span className={cn(selected.length && "text-muted-foreground")}>{title}</span>
           {summary && <span className="truncate font-semibold">{summary}</span>}
           <ChevronDownIcon className="text-muted-foreground" />

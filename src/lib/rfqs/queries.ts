@@ -3,10 +3,8 @@ import { and, asc, desc, eq, gte, inArray, lte, type SQL, sql } from "drizzle-or
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/db";
 import { approvedSources, fscClasses, postingDays, rfqChanges, rfqLineItems as r } from "@/db/schema";
-import type { Filters } from "./filters";
+import { type Filters, PAGE_SIZE } from "./filters";
 import { addDays, todayEastern } from "./labels";
-
-export const PAGE_SIZE = 50;
 
 /** Search input → tokens. NSN-looking tokens lose their dashes so 5305-00-123-4567 matches 5305001234567. */
 function searchTokens(q: string) {

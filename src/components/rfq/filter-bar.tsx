@@ -48,9 +48,11 @@ export function FilterBar({ filters, facets, total }: { filters: Filters; facets
       <div className="flex flex-col gap-2 sm:flex-row">
         <SearchBox value={f.q} onSearch={(q) => apply({ q })} pending={pending} />
         <Select value={f.sort} onValueChange={(sort) => apply({ sort: sort as Sort })}>
-          <SelectTrigger className="h-10! w-full sm:w-48" aria-label="Sort">
+          <SelectTrigger className="h-11! w-full bg-card shadow-xs sm:w-52" aria-label="Sort">
             <ArrowUpDownIcon className="text-muted-foreground" />
-            <SelectValue />
+            <SelectValue>
+              <span className="text-muted-foreground">Sort:</span> {SORTS[f.sort]}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent align="end">
             {Object.entries(SORTS).map(([value, label]) => (
@@ -72,12 +74,13 @@ export function FilterBar({ filters, facets, total }: { filters: Filters; facets
           onValueChange={(v) => v && apply({ closing: v === "any" ? null : Number(v) })}
           aria-label="Closing within"
         >
-          <ToggleGroupItem value="any" className="px-2.5">
+          <ToggleGroupItem value="any" className={TOGGLE}>
             Any close date
           </ToggleGroupItem>
           {CLOSING_WINDOWS.map((n) => (
-            <ToggleGroupItem key={n} value={String(n)} className="px-2.5" title={`Return by within ${n} days`}>
-              ≤ {n}d <span className="text-xs tabular-nums text-muted-foreground">{facets.closing[`d${n}`]?.toLocaleString()}</span>
+            <ToggleGroupItem key={n} value={String(n)} className={TOGGLE} title={`Return by within ${n} days`}>
+              ≤ {n} days{" "}
+              <span className="text-xs font-normal text-muted-foreground tabular-nums">{facets.closing[`d${n}`]?.toLocaleString()}</span>
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
@@ -87,9 +90,10 @@ export function FilterBar({ filters, facets, total }: { filters: Filters; facets
         <MoreFilters f={f} facets={facets} apply={apply} />
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
-        <p className="font-medium tabular-nums">
-          {total.toLocaleString()} {f.includeClosed ? "" : "open "}line item{total === 1 ? "" : "s"}
+      <div className="flex min-h-7 flex-wrap items-center gap-x-3 gap-y-2">
+        <p className="text-sm text-muted-foreground">
+          <span className="text-base font-semibold text-foreground tabular-nums">{total.toLocaleString()}</span>{" "}
+          {f.includeClosed ? "" : "open "}line item{total === 1 ? "" : "s"}
         </p>
         {pending && <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" aria-label="Loading" />}
         <ActiveChips f={f} facets={facets} apply={apply} />
@@ -136,7 +140,7 @@ function SearchBox({ value, onSearch, pending }: { value: string; onSearch: (q: 
   }, []);
 
   return (
-    <InputGroup className="h-10 flex-1">
+    <InputGroup className="h-11 flex-1 bg-card shadow-xs">
       <InputGroupAddon>{pending ? <LoaderCircleIcon className="animate-spin" /> : <SearchIcon />}</InputGroupAddon>
       <InputGroupInput
         ref={input}
@@ -145,7 +149,7 @@ function SearchBox({ value, onSearch, pending }: { value: string; onSearch: (q: 
         onKeyDown={(e) => e.key === "Enter" && send(text)}
         placeholder="Search item name, NSN, part #, CAGE, solicitation # or PR #"
         aria-label="Search RFQs"
-        className="text-base sm:text-sm"
+        className="text-base sm:text-[15px]"
       />
       {text ? (
         <InputGroupAddon align="inline-end">
@@ -163,6 +167,8 @@ function SearchBox({ value, onSearch, pending }: { value: string; onSearch: (q: 
 }
 
 type Apply = (patch: Partial<Filters>) => void;
+
+const TOGGLE = "bg-card px-2.5 data-[state=on]:bg-accent data-[state=on]:font-semibold data-[state=on]:text-accent-foreground";
 
 function MoreFilters({ f, facets, apply }: { f: Filters; facets: Facets; apply: Apply }) {
   const count =
@@ -182,7 +188,7 @@ function MoreFilters({ f, facets, apply }: { f: Filters; facets: Facets; apply: 
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className={cn(count && "border-primary/40 bg-primary/5")}>
+        <Button variant="outline" size="sm" className={cn("bg-card", count && "border-primary/40 bg-accent text-accent-foreground")}>
           <SlidersHorizontalIcon />
           More filters
           {count > 0 && <span className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground">{count}</span>}
@@ -220,9 +226,11 @@ function MoreFilters({ f, facets, apply }: { f: Filters; facets: Facets; apply: 
             value={f.inspection ?? "any"}
             onValueChange={(v) => v && apply({ inspection: v === "any" ? null : v })}
           >
-            <ToggleGroupItem value="any">Any</ToggleGroupItem>
+            <ToggleGroupItem value="any" className={TOGGLE}>
+              Any
+            </ToggleGroupItem>
             {inspection.map((c) => (
-              <ToggleGroupItem key={c.value} value={c.value}>
+              <ToggleGroupItem key={c.value} value={c.value} className={TOGGLE}>
                 {c.label} <span className="text-xs text-muted-foreground">{c.count.toLocaleString()}</span>
               </ToggleGroupItem>
             ))}
@@ -380,7 +388,7 @@ function ActiveChips({ f, facets, apply }: { f: Filters; facets: Facets; apply: 
           key={c.key}
           type="button"
           onClick={() => apply(c.remove)}
-          className="inline-flex items-center gap-1 rounded-full border bg-muted/50 py-0.5 pr-1.5 pl-2.5 text-xs hover:bg-muted"
+          className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-accent py-0.5 pr-1.5 pl-2.5 text-xs font-medium text-accent-foreground hover:border-primary/40"
         >
           {c.label}
           <XIcon className="size-3 text-muted-foreground" />
