@@ -239,3 +239,33 @@ decision points. Noah's answers:
   throws. Fixed with `await connection()` before the clock read, inside the Suspense boundary.
 - **Production:** live at https://salespatriot-bay.vercel.app about 24 s after push. Full page
   loads take 0.2–0.35 s.
+
+## 15. Visual pass: padding, card, popups, hierarchy, copy buttons
+- **Noah:** "let's improve the UI of this, appropriate padding around the page. the result table
+  should be in a card. there is a problem with the background of popups being transparent.
+  Let's also make the colors and feel more appropriate, fresh, and clean."
+- **Noah, mid-pass:** "focus on information hierarchy. Font size, bolding, grouping, being able
+  to quickly have a one click copy icon next to important pieces."
+- **Diagnosis (Claude, checked in Chrome, not guessed):** the popups were opaque white once open,
+  but sat on an all-white page with only a 10% ring. They blended in, and the table showed
+  through during the fade-in. Fix: tinted slate page background, white cards, popups with a real
+  border and a deeper shadow.
+- **Also found while looking:** the sort dropdown rendered a blank value (fixed).
+- **Hierarchy choices:**
+  - Item name semibold.
+  - Identifiers (solicitation #, NSN) in mono, copy icon on row hover.
+  - Quantities bold tabular numbers.
+  - Closing date as an urgency pill: red ≤1 day, amber ≤3.
+  - Set-aside as a green badge only when restricted.
+  - Detail panel: 4 key stats (closes, quantity, delivery, eligibility), then grouped
+    Identifiers / Terms / Buyer / Approved sources, with copy on every identifier, CAGE and part #.
+- **Process:** Claude kept this in one thread because theme, layout, and components are
+  interdependent. Verified at desktop width by rendering the page in a 1440 px iframe, since the
+  Chrome window wouldn't go wider than 899 px.
+- **Misstep:** a client component imported a constant from the `server-only` query module and
+  broke the build. Moved `PAGE_SIZE` to the shared filters module. A stale local server on the
+  same port briefly made it look like a runtime error.
+- **Noah's next ask (queued):** "power up the table like a real modern powerhouse. primary and
+  secondary sorting, column arrangement with drag-n-drop, (sorting shouldn't just be the ascii
+  icon, use proper icon library), column filtering (adding and removing columns remembered via
+  local storage). better pagination information/interactivity at both the top and bottom of a page."
