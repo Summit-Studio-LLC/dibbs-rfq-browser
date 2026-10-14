@@ -323,3 +323,49 @@ decision points. Noah's answers:
     keys-first pagination, and fold part #/CAGE into `search_text` so the trigram index gets used.
 - **Cut for time:** a dedicated sort-editor popover (the "Sort" menu plus chips cover it), body
   cells dragging along with the header, and the cron ingest route.
+
+## 17. Final polish: width, sorting, phones, resizing, and the data-sync plan
+
+- **Wide screens.** Noah: "If I've got more than enough width, I shouldn't need to scroll
+  horizontally to see all the columns, especially when I have a particular RFQ panel oopen."
+  - The page max width went from 1680 to 2560px, the detail panel narrowed to 26–30rem, and
+    column minimums were tightened.
+  - Footer: Noah asked to "move the bottom pagination over to the right and move the keyboard
+    shortcuts above the 'showing 1 of 50'… on widescreen." That's a two-column footer at xl.
+- **Sort bug report.** Noah: "secondary sorts are not working, i beileve… i'm tyring to secondary
+  sort on NSN… also, the Award column header has elipsis."
+  - Checked the server first: `?sort=closes,nsn` and `-nsn` order correctly on production, so
+    the SQL was fine.
+  - Likely cause in the UI: with two levels already set (Closes + Qty), Shift+click adds NSN as a
+    third level, which barely changes anything. Fix: a **sort editor** with an explicit column
+    and direction per level, plus add/remove and reset (this was "cut for time" in §16).
+  - Ellipsis: the hidden grip, menu, and sort hint still took space. The unsorted hint now takes
+    no space until hover. Label widths were **measured** in a headless browser, and the defaults
+    were raised so every label fits with the sort arrow and level badge.
+- **Phones.** Noah: "pagination interactivity breaks on mobile. you just don't see the option to
+  navigate, that should be much simpler but still capable."
+  - Measured with Playwright on emulated iPhone SE, iPhone 13 and Pixel. The pager existed, but
+    about 5,400px down, under 50 cards; the only other control was a 28px pager in the toolbar.
+  - Fix: a **bar pinned to the bottom of the screen** with 44px prev/next and a native page picker
+    in the middle (the OS wheel, showing rows per page). After a page change the list scrolls to
+    its top.
+  - Gotcha: `position: sticky` needs the card to use `overflow: clip`, not `hidden`, on phones.
+- **Column resizing.** Noah: "column resizign needs to possible."
+  - Drag a header's right edge; double-click resets; arrow keys nudge for keyboard users.
+  - The drag writes to the `<col>` directly, so 50 rows don't re-render per pointer move. Widths
+    save on release with the column prefs.
+  - The item column is flexible, so its handle sets its minimum.
+  - Verified with Playwright: 136 → 191px on drag, persists across reload, resets on double-click.
+- **Body cells follow a dragged header** via CSS variables on the table (also cut in §16).
+- **Loading and syncing data.** Noah: "let's discuss loading and syncing data, that is the last
+  piece of this puzzle I'd realy like to figure out."
+  - Today: manual `pnpm ingest`, idempotent per posting day, with a `posting_days` ledger and an
+    `rfq_changes` diff.
+  - The DIBBS archive has 23 posting days (Sep 14 → Oct 13).
+  - Plan: Vercel Cron on weekdays (a background agent is building `/api/cron/ingest` with
+    `CRON_SECRET`). Each run catches up any missed day, works oldest-first within the 300s
+    budget, and revalidates cached facets.
+  - Also planned: an ingest-run log with a "last checked" pill, and a backfill of all 23 days.
+  - Known gap: the daily files don't signal cancellations or awards. Handling those needs a
+    separate, rate-limited status check per open RFQ.
+  - Open questions for Noah: backfill depth, date-only vs status checks, and retention.
